@@ -133,6 +133,10 @@ export default function Home() {
   }, [difficulty]);
 
   useEffect(() => {
+    if (!window.localStorage.getItem("bakery-guide-seen")) setShowHelp(true);
+  }, []);
+
+  useEffect(() => {
     if (status !== "playing") return;
     const timer = window.setInterval(() => setSeconds((value) => Math.min(value + 1, 999)), 1000);
     return () => window.clearInterval(timer);
@@ -222,13 +226,18 @@ export default function Home() {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
     longPressTimer.current = setTimeout(() => {
       toggleFlag(index);
-      suppressClickUntil.current = Date.now() + 450;
-    }, 480);
+      suppressClickUntil.current = Date.now() + 360;
+    }, 320);
   };
 
   const cancelLongPress = () => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
     longPressTimer.current = null;
+  };
+
+  const closeHelp = () => {
+    window.localStorage.setItem("bakery-guide-seen", "1");
+    setShowHelp(false);
   };
 
   const useScan = () => {
@@ -390,19 +399,20 @@ export default function Home() {
       <footer><span>DESIGNED FOR 小顾 × 小温</span><span>GUARDED BY 339</span></footer>
 
       {showHelp && (
-        <div className="modal-backdrop" onMouseDown={() => setShowHelp(false)}>
+        <div className="modal-backdrop" onMouseDown={closeHelp}>
           <section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="modal-close pressable" onClick={() => setShowHelp(false)} aria-label="关闭说明">×</button>
+            <button className="modal-close pressable" onClick={closeHelp} aria-label="关闭说明">×</button>
             <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" />
-            <span className="mission-tag">339 使用说明</span>
-            <h2 id="help-title">找到早餐，避开烤焦面包</h2>
+            <span className="mission-tag">第一次来？</span>
+            <h2 id="help-title">30 秒学会心动扫雷</h2>
+            <p className="guide-intro">目标很简单：帮小顾安全地找齐小温喜欢的早餐。</p>
             <ol>
-              <li><b>翻开格子</b>：数字代表周围 8 格里烤焦面包的数量。</li>
-              <li><b>贴小顾贴纸</b>：手机长按格子，电脑右键格子；再长按一次即可收回。</li>
-              <li><b>收集早餐</b>：小顾要找齐小温喜欢的牛角包和面包。</li>
-              <li><b>339 扫描</b>：每局可自动找到并翻开一格安全区。</li>
+              <li><b>先轻点一格</b>：格子会翻开，而且开局第一格一定安全。</li>
+              <li><b>看懂数字</b>：数字是它周围 8 格中“烤焦面包”的数量。</li>
+              <li><b>怀疑有危险就长按</b>：约 0.3 秒贴上小顾；再次长按可以收回。</li>
+              <li><b>怎样算赢</b>：翻开所有安全格、找齐早餐；卡住时可用一次 339 扫描。</li>
             </ol>
-            <button className="primary-button pressable" onClick={() => setShowHelp(false)}>明白，开始烘焙</button>
+            <button className="primary-button pressable" onClick={closeHelp}>明白，开始找牛角包</button>
           </section>
         </div>
       )}
