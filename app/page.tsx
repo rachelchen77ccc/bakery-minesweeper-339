@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { CroissantPuzzle } from "./CroissantPuzzle";
 import { useGameAudio } from "./useGameAudio";
 
 type Breakfast = "croissant" | "bread" | null;
@@ -36,6 +37,46 @@ const ASSET_ROOT = "assets";
 const TUTORIAL_REVEAL_TARGET = 40;
 const TUTORIAL_MINE_TARGET = 41;
 const TUTORIAL_STORAGE_KEY = "bakery-tutorial-v2-complete";
+
+type BakeryMode = "menu" | "minesweeper" | "platter";
+
+export default function Home() {
+  const [mode, setMode] = useState<BakeryMode>("menu");
+
+  if (mode === "minesweeper") return <MinesweeperMode onBack={() => setMode("menu")} />;
+  if (mode === "platter") return <CroissantPuzzle onBack={() => setMode("menu")} />;
+
+  return (
+    <main className="mode-menu-shell">
+      <header className="mode-menu-brand">
+        <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" />
+        <div><span>339&apos;S BAKERY</span><h1>今天玩哪一种？</h1></div>
+      </header>
+      <figure className="mode-menu-hero">
+        <img src={`${ASSET_ROOT}/success-bakery.jpg`} alt="小顾、小温和339在烘焙屋准备牛角包" />
+        <figcaption><b>小顾 × 小温的烘焙约会</b><span>选一个任务，339 已经准备好啦</span></figcaption>
+      </figure>
+      <section className="mode-choice-list" aria-label="选择游戏模式">
+        <button className="mode-choice minesweeper-choice pressable" onClick={() => setMode("minesweeper")}>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><i>?</i></span>
+          <span className="mode-choice-copy"><small>经典寻宝</small><b>顾温甜蜜扫雷</b><em>看数字、避开烤焦面包，找齐早餐</em></span>
+          <strong>开始 ›</strong>
+        </button>
+        <button className="mode-choice platter-choice pressable" onClick={() => setMode("platter")}>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.png`} alt="" /><i>12</i></span>
+          <span className="mode-choice-copy"><small>全新推理</small><b>牛角包摆盘</b><em>颜色、行列与距离，12 关逐步变难</em></span>
+          <strong>挑战 ›</strong>
+        </button>
+      </section>
+      <div className="mode-menu-cast" aria-hidden="true">
+        <img src={`${ASSET_ROOT}/xiaogu.png`} alt="" />
+        <span>♡</span>
+        <img src={`${ASSET_ROOT}/xiaowen.png`} alt="" />
+      </div>
+      <p className="mode-menu-note">进度只保存在当前设备 · 随时可以返回切换</p>
+    </main>
+  );
+}
 
 function buildTutorialBoard() {
   const board = emptyCells(81);
@@ -140,10 +181,10 @@ function vibrate(pattern: number | number[]) {
   if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(pattern);
 }
 
-export default function Home() {
+function MinesweeperMode({ onBack }: { onBack: () => void }) {
   const [difficulty, setDifficulty] = useState<DifficultyKey>("cozy");
   const config = DIFFICULTIES[difficulty];
-  const [breakfastGoal, setBreakfastGoal] = useState(DIFFICULTIES.cozy.breakfast.min);
+  const [breakfastGoal, setBreakfastGoal] = useState<number>(DIFFICULTIES.cozy.breakfast.min);
   const [cells, setCells] = useState<Cell[]>(() => emptyCells(config.rows * config.cols));
   const [status, setStatus] = useState<GameStatus>("idle");
   const [generated, setGenerated] = useState(false);
@@ -422,7 +463,9 @@ export default function Home() {
       <img className="floating-food floating-bread" src={`${ASSET_ROOT}/bread.png`} alt="" aria-hidden="true" />
 
       <header className="topbar">
-        <div className="brand-mark"><img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" /></div>
+        <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择">
+          <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" /><span>‹</span>
+        </button>
         <div className="title-block">
           <p className="eyebrow">339&apos;s bakery protocol</p>
           <h1>心动烘焙扫雷</h1>
