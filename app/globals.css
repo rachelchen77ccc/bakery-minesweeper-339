@@ -130,6 +130,8 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); letter-spacing: -.07em; line-
 footer { display: flex; justify-content: space-between; margin-top: 21px; padding: 0 5px; color: rgba(111,67,79,.55); font: 900 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
 .tutorial-shield { position: fixed; z-index: 70; inset: 0; background: rgba(66,38,47,.58); backdrop-filter: blur(2px); animation: fade .2s ease; }
 .tutorial-target { position: relative !important; z-index: 76 !important; pointer-events: auto !important; outline: 3px solid #fff7a8 !important; outline-offset: 3px; box-shadow: 0 0 0 7px rgba(255,218,104,.52), 0 0 28px 12px rgba(255,224,126,.58) !important; animation: tutorialPulse 1s ease-in-out infinite !important; }
+.tutorial-neighbor { position: relative; z-index: 74; pointer-events: none; outline: 1px dashed rgba(255,255,255,.9); outline-offset: -2px; filter: brightness(1.08); }
+.tutorial-reference { position: relative; z-index: 75; pointer-events: none; outline: 3px solid #7ee2e9; outline-offset: 2px; box-shadow: 0 0 0 6px rgba(103,215,225,.35) !important; }
 .tutorial-coach { position: fixed; z-index: 82; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); width: min(calc(100% - 24px), 390px); padding: 15px 16px 16px; border: 2px solid #f2ced2; border-radius: 21px; color: var(--ink); background: #fffaf3; box-shadow: 0 10px 0 rgba(119,65,81,.2), 0 24px 55px rgba(56,30,38,.35); text-align: center; animation: result .3s cubic-bezier(.2,1.3,.4,1); }
 .tutorial-coach.upper { top: max(76px, env(safe-area-inset-top)); bottom: auto; }
 .tutorial-coach.centered { top: 50%; bottom: auto; transform: translate(-50%, -50%); }
@@ -140,6 +142,7 @@ footer { display: flex; justify-content: space-between; margin-top: 21px; paddin
 .tutorial-head b { padding: 4px 7px; border-radius: 999px; color: #fff; background: var(--berry); font: 900 8px/1 ui-monospace, monospace; }
 .tutorial-coach h2 { margin: 3px 0 5px; font-size: 17px; }
 .tutorial-coach p { margin: 0; color: #936a74; font-size: 10px; line-height: 1.55; }
+.number-rule { display: inline; color: #a33f5c; }
 .tutorial-wait { display: inline-block; margin-top: 9px; color: #b15470; font-size: 9px; font-weight: 900; }
 .tutorial-button { min-height: 42px; margin-top: 13px; padding: 0 23px; border: 0; border-radius: 999px; color: #fff; background: var(--berry); box-shadow: 0 4px 0 #8e354f; font-size: 11px; font-weight: 900; }
 .pause-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 12px; background: rgba(85,49,58,.46); backdrop-filter: blur(9px); animation: fade .2s ease; }
