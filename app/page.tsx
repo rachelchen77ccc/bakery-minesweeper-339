@@ -436,7 +436,8 @@ export default function Home() {
         </div>
 
         <section className="story-postcard" aria-label="小顾和小温的烘焙约会">
-          <img src={`${ASSET_ROOT}/date-postcard.jpg`} alt="小顾和小温依偎在一起" />
+          <img className="postcard-ambient" src={`${ASSET_ROOT}/date-postcard.jpg`} alt="" aria-hidden="true" />
+          <img className="postcard-feature" src={`${ASSET_ROOT}/bakery-family.jpg`} alt="小顾、小温和 339 一起准备牛角包" />
           <div><span>BAKERY DATE</span><b>小顾 × 小温</b><small>{postcardLine}</small></div>
         </section>
 
