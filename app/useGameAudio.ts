@@ -69,18 +69,11 @@ export function useGameAudio(gamePaused = false) {
   }, []);
 
   useEffect(() => {
-    const bgm = new Audio(`${AUDIO_ROOT}/bgm/bakery-loop.mp3`);
-    bgm.preload = "metadata";
+    const bgm = new Audio();
+    bgm.preload = "none";
     bgm.loop = musicLoop;
     bgm.volume = musicVolume;
     bgmRef.current = bgm;
-
-    const names: SfxName[] = ["reveal", "flag", "help", "win", "lose", "click"];
-    names.forEach((name) => {
-      const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
-      sound.preload = "auto";
-      sfxRef.current[name] = sound;
-    });
 
     return () => {
       bgm.pause();
@@ -100,7 +93,10 @@ export function useGameAudio(gamePaused = false) {
       bgm.loop = musicLoop;
       bgm.volume = Math.min(1, musicVolume * duckFactorRef.current);
       if (!musicEnabled || gamePaused) bgm.pause();
-      else if (unlockedRef.current) void bgm.play().catch(() => undefined);
+      else if (unlockedRef.current) {
+        if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+        void bgm.play().catch(() => undefined);
+      }
     }
 
     if (settingsReady) {
@@ -126,13 +122,20 @@ export function useGameAudio(gamePaused = false) {
       setAudioUnlocked(true);
     }
     const bgm = bgmRef.current;
-    if (bgm && !gamePaused && musicEnabledRef.current && bgm.paused) void bgm.play().catch(() => undefined);
+    if (bgm && !gamePaused && musicEnabledRef.current && bgm.paused) {
+      if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+      void bgm.play().catch(() => undefined);
+    }
   }, [gamePaused]);
 
   const playSfx = useCallback((name: SfxName) => {
     if (!sfxEnabledRef.current) return;
-    const sound = sfxRef.current[name];
-    if (!sound) return;
+    let sound = sfxRef.current[name];
+    if (!sound) {
+      sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
+      sound.preload = "none";
+      sfxRef.current[name] = sound;
+    }
 
     const mix = SFX_MIX[name];
     sound.pause();

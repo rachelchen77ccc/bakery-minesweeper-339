@@ -49,30 +49,26 @@ export default function Home() {
   return (
     <main className="mode-menu-shell">
       <header className="mode-menu-brand">
-        <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" />
+        <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" decoding="async" fetchPriority="high" />
         <div><span>339&apos;S BAKERY</span><h1>今天玩哪一种？</h1></div>
       </header>
       <figure className="mode-menu-hero">
-        <img src={`${ASSET_ROOT}/success-bakery.jpg`} alt="小顾、小温和339在烘焙屋准备牛角包" />
+        <img src={`${ASSET_ROOT}/success-bakery.jpg`} alt="小顾、小温和339在烘焙屋准备牛角包" decoding="async" fetchPriority="high" />
         <figcaption><b>小顾 × 小温的烘焙约会</b><span>选一个任务，339 已经准备好啦</span></figcaption>
       </figure>
       <section className="mode-choice-list" aria-label="选择游戏模式">
         <button className="mode-choice minesweeper-choice pressable" onClick={() => setMode("minesweeper")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><i>?</i></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/339.png`} alt="" decoding="async" /><i>?</i></span>
           <span className="mode-choice-copy"><small>经典寻宝</small><b>顾温甜蜜扫雷</b><em>看数字、避开烤焦面包，找齐早餐</em></span>
           <strong>开始 ›</strong>
         </button>
         <button className="mode-choice platter-choice pressable" onClick={() => setMode("platter")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.png`} alt="" /><i>12</i></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.png`} alt="" decoding="async" /><i>12</i></span>
           <span className="mode-choice-copy"><small>全新推理</small><b>牛角包摆盘</b><em>颜色、行列与距离，12 关逐步变难</em></span>
           <strong>挑战 ›</strong>
         </button>
       </section>
-      <div className="mode-menu-cast" aria-hidden="true">
-        <img src={`${ASSET_ROOT}/xiaogu.png`} alt="" />
-        <span>♡</span>
-        <img src={`${ASSET_ROOT}/xiaowen.png`} alt="" />
-      </div>
+      <div className="mode-menu-cast mode-menu-cast-copy" aria-hidden="true"><span>小顾 ♡ 小温</span></div>
       <p className="mode-menu-note">进度只保存在当前设备 · 随时可以返回切换</p>
     </main>
   );

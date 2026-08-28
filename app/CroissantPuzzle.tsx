@@ -409,15 +409,23 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     const fromRow = Math.floor(from / config.size); const fromCol = from % config.size;
     const toRow = Math.floor(to / config.size); const toCol = to % config.size;
     const steps = Math.max(Math.abs(toRow - fromRow), Math.abs(toCol - fromCol));
+    const next = [...marksRef.current];
+    let changed = false;
     for (let step = 0; step <= steps; step += 1) {
       const ratio = steps === 0 ? 0 : step / steps;
       const row = Math.round(fromRow + (toRow - fromRow) * ratio);
       const col = Math.round(fromCol + (toCol - fromCol) * ratio);
       const index = row * config.size + col;
-      if (marksRef.current[index] !== 2 && tutorialAllows(index, "cross") && marksRef.current[index] !== 1) {
-        applyMark(index, 1, false, false);
+      if (next[index] !== 2 && tutorialAllows(index, "cross") && next[index] !== 1) {
+        next[index] = 1;
+        changed = true;
       }
     }
+    if (!changed) return false;
+    marksRef.current = next;
+    setMarks(next);
+    setStatus("playing");
+    return true;
   };
 
   const activateDrag = (index: number) => {
@@ -427,7 +435,10 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
     if (dragSnapshot.current) setUndoSnapshot(dragSnapshot.current);
     dragLastIndex.current = dragStart.current?.index ?? index;
-    paintDragPath(dragLastIndex.current, index);
+    if (paintDragPath(dragLastIndex.current, index)) {
+      setMessage("正在连续标记 ×：划过的格子会一次性更新。");
+      registerActivity();
+    }
     vibrate(14);
   };
 
@@ -594,7 +605,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   return (
     <main className={`game-shell platter-shell ${!tutorialReady || tutorialStep !== null ? "tutorial-active" : ""}`} onPointerDown={unlockAudio}>
       <header className="topbar platter-topbar">
-        <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" /><span>‹</span></button>
+        <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" decoding="async" fetchPriority="high" /><span>‹</span></button>
         <div className="title-block"><p className="eyebrow">CROISSANT LOGIC</p><h1>牛角包摆盘</h1></div>
         <div className="top-actions">
           <button className={`round-button audio-button pressable ${allMuted ? "muted" : ""}`} onClick={() => { setMusicEnabled(allMuted); setSfxEnabled(allMuted); if (!allMuted) playSfx("click"); }} aria-label={allMuted ? "打开声音" : "关闭声音"}>♫</button>
@@ -603,9 +614,9 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       </header>
 
       <section className="platter-mission">
-        <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
+        <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" decoding="async" />
         <div><span>小温的摆盘课</span><b>{message}</b></div>
-        <img src={`${ASSET_ROOT}/croissant.png`} alt="牛角包" />
+        <img src={`${ASSET_ROOT}/croissant.png`} alt="牛角包" decoding="async" />
       </section>
 
       <section className={`platter-panel ${status}`} aria-label={`牛角包摆盘第 ${levelIndex + 1} 关`}>
@@ -665,7 +676,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
                 onContextMenu={(event) => event.preventDefault()}
               >
                 {mark === 1 && <span className="puzzle-cross">×</span>}
-                {mark === 2 && <img src={`${ASSET_ROOT}/croissant.png`} alt="牛角包" />}
+                {mark === 2 && <img src={`${ASSET_ROOT}/croissant.png`} alt="牛角包" decoding="async" />}
               </button>
             );
           })}
@@ -677,16 +688,16 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         </div>
 
         <div className={`platter-tools ${tutorialStep === 5 ? "tutorial-target" : ""}`}>
-          <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>339扫描</b><small>锁定正确格</small></span><i>{toolsLeft.scan}</i></button>
-          <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><span><b>小顾整理</b><small>闪亮批量 ×</small></span><i>{toolsLeft.tidy}</i></button>
-          <button className="prop-button pressable" onClick={() => handleTool("intuition")} disabled={toolsLeft.intuition <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><span><b>小温直觉</b><small>摆对一个</small></span><i>{toolsLeft.intuition}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.png`} alt="" decoding="async" fetchPriority="low" /><span><b>339扫描</b><small>锁定正确格</small></span><i>{toolsLeft.scan}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" decoding="async" fetchPriority="low" /><span><b>小顾整理</b><small>闪亮批量 ×</small></span><i>{toolsLeft.tidy}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("intuition")} disabled={toolsLeft.intuition <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" decoding="async" fetchPriority="low" /><span><b>小温直觉</b><small>摆对一个</small></span><i>{toolsLeft.intuition}</i></button>
         </div>
 
         {showIdleHint && <button className="idle-hint-bubble pressable" onClick={() => { setShowIdleHint(false); handleTool("scan"); }}><img src={`${ASSET_ROOT}/339.png`} alt="" /><span>要不要试试 339 扫描？</span></button>}
 
         {(status === "won" || status === "failed") && (
           <section className={`platter-result ${status}`} role="status">
-            {status === "won" ? <div className="platter-result-art"><img src={`${ASSET_ROOT}/couple-sticker.png`} alt="小顾和小温贴贴庆祝" /></div> : <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />}
+            {status === "won" ? <div className="platter-result-art"><img src={`${ASSET_ROOT}/couple-sticker.png`} alt="小顾和小温贴贴庆祝" decoding="async" loading="lazy" /></div> : <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" decoding="async" />}
             <div><small>{status === "won" ? victory.badge : "TRY AGAIN"}</small><h2>{status === "won" ? victory.title : "摆盘需要调整一下"}</h2><p>{status === "won" ? victory.copy : "保留这张餐盘，从系统给定的第一个牛角包重新推理。"}</p></div>
             <div className="result-actions">
               {status === "failed" && undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastAction}>撤回这步</button>}
