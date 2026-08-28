@@ -13,6 +13,7 @@ type AudioSettings = {
 };
 
 const AUDIO_ROOT = "audio";
+const SFX_CACHE_VERSION = "20260828-2";
 const STORAGE_KEY = "bakery-audio-settings";
 const DEFAULT_SETTINGS: AudioSettings = {
   musicEnabled: true,
@@ -76,7 +77,7 @@ export function useGameAudio() {
 
     const names: SfxName[] = ["reveal", "flag", "help", "win", "lose", "click"];
     names.forEach((name) => {
-      const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3`);
+      const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
       sound.preload = "auto";
       sfxRef.current[name] = sound;
     });
