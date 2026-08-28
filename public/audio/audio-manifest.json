@@ -1,0 +1,13 @@
+{
+  "bgm": {
+    "bakeryLoop": "audio/bgm/bakery-loop.mp3"
+  },
+  "sfx": {
+    "reveal": "audio/sfx/reveal.mp3",
+    "flag": "audio/sfx/flag.mp3",
+    "help": "audio/sfx/help.mp3",
+    "win": "audio/sfx/win.mp3",
+    "lose": "audio/sfx/lose.mp3",
+    "click": "audio/sfx/click.mp3"
+  }
+}
