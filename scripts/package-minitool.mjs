@@ -5,7 +5,7 @@ import { extname, join, relative, resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const dist = join(root, "dist-minitool");
 const outputs = join(root, "outputs");
-const artifact = join(outputs, "339心动烘焙小工具-v1.4.1.zip");
+const artifact = join(outputs, "339心动烘焙小工具-v1.4.2.zip");
 const reportPath = join(outputs, "小红书小工具-校验摘要.txt");
 
 const optionalFiles = [
@@ -23,6 +23,33 @@ const optionalFiles = [
 for (const file of optionalFiles) rmSync(join(dist, file), { force: true });
 writeFileSync(join(dist, "index.html"), readFileSync(join(root, "minitool/index.html")));
 
+const miniToolBgm = join(dist, "audio/bgm/minitool-loop.m4a");
+if (process.platform === "darwin") {
+  execFileSync("xcrun", [
+    "swift",
+    join(root, "scripts/trim-minitool-bgm.swift"),
+    join(dist, "audio/bgm/bakery-loop.mp3"),
+    miniToolBgm,
+  ], { stdio: "pipe" });
+}
+
+const embeddedAudioSources = {
+  bgm: process.platform === "darwin" ? "audio/bgm/minitool-loop.m4a" : "audio/bgm/bakery-loop.mp3",
+  reveal: "audio/sfx/reveal.mp3",
+  flag: "audio/sfx/flag.mp3",
+  help: "audio/sfx/help.mp3",
+  win: "audio/sfx/win.mp3",
+  lose: "audio/sfx/lose.mp3",
+  click: "audio/sfx/click.mp3",
+};
+const embeddedAudio = Object.fromEntries(Object.entries(embeddedAudioSources).map(([name, file]) => {
+  const absolute = join(dist, file);
+  if (!existsSync(absolute)) throw new Error(`缺少音频源文件：${file}`);
+  return [name, readFileSync(absolute).toString("base64")];
+}));
+writeFileSync(join(dist, "assets/audio-data.js"), `window.__BAKERY_AUDIO__=${JSON.stringify(embeddedAudio)};\n`);
+rmSync(join(dist, "audio"), { recursive: true, force: true });
+
 const files = [];
 function walk(directory) {
   for (const name of readdirSync(directory)) {
@@ -34,10 +61,9 @@ function walk(directory) {
 walk(dist);
 
 const failures = [];
-const warnings = [];
 const allowedExtensions = new Set([
   ".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
-  ".woff", ".woff2", ".json", ".mp3",
+  ".woff", ".woff2", ".json",
 ]);
 const relativeFiles = files.map((file) => relative(dist, file).replaceAll("\\", "/"));
 if (!relativeFiles.includes("index.html")) failures.push("ZIP 根目录缺少 index.html");
@@ -48,10 +74,10 @@ for (const file of relativeFiles) {
 }
 
 const html = readFileSync(join(dist, "index.html"), "utf8");
-const js = readFileSync(join(dist, "assets/app.js"), "utf8");
+const js = relativeFiles.filter((file) => file.endsWith(".js")).map((file) => readFileSync(join(dist, file), "utf8")).join("\n");
 const css = readFileSync(join(dist, "assets/style.css"), "utf8");
 const requiredHtml = [
-  [/<html lang="zh-CN">/, "缺少 lang=zh-CN"],
+  [/<html\b[^>]*lang="zh-CN"/, "缺少 lang=zh-CN"],
   [/charset="UTF-8"/, "缺少 UTF-8 charset"],
   [/width=device-width/, "viewport 缺少 width=device-width"],
   [/initial-scale=1\.0/, "viewport 缺少 initial-scale=1.0"],
@@ -88,16 +114,20 @@ for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
   if (!existsSync(target)) failures.push(`HTML 引用缺失资源：${source}`);
 }
 
-const referencedAssets = [...js.matchAll(/["'`](assets|audio)\/([^"'`?]+)/g)].map((match) => `${match[1]}/${match[2]}`);
+const audioBundleMatch = html.match(/data-audio-bundle="([^"]+)"/);
+if (!audioBundleMatch) failures.push("缺少 data-audio-bundle 音频数据包声明");
+else if (!existsSync(join(dist, audioBundleMatch[1].replace(/^\.\//, "")))) failures.push("音频数据包引用不存在");
+for (const name of Object.keys(embeddedAudioSources)) {
+  if (!Object.hasOwn(embeddedAudio, name) || !embeddedAudio[name]) failures.push(`音频数据包缺少：${name}`);
+}
+
+const referencedAssets = [...js.matchAll(/["'`]assets\/([^"'`?]+)/g)].map((match) => `assets/${match[1]}`);
 for (const source of new Set(referencedAssets)) {
   if (!existsSync(join(dist, source))) failures.push(`JS 引用缺失资源：${source}`);
 }
 
 const unpackedBytes = files.reduce((sum, file) => sum + statSync(file).size, 0);
 if (unpackedBytes > 10 * 1024 * 1024) failures.push(`未压缩包超过 10MB：${(unpackedBytes / 1024 / 1024).toFixed(2)}MB`);
-if (relativeFiles.some((file) => file.endsWith(".mp3"))) {
-  warnings.push("包内 MP3 均为本地媒体；依据能力清单“音视频播放、媒体文件须打包在内”保留。首次播放仍需用户手势解锁。 ");
-}
 
 if (failures.length) {
   console.error(`小红书小工具校验失败：\n- ${failures.join("\n- ")}`);
@@ -121,11 +151,11 @@ const report = [
   `ZIP 体积：${(zipBytes / 1024 / 1024).toFixed(2)} MB`,
   "入口：index.html（ZIP 根目录）",
   "脚本：经典 IIFE，无 type=module / import / export / 内联脚本",
-  "资源：全部本地相对路径，无外链；图片为 WebP；音乐与音效为包内媒体",
+  "资源：全部本地相对路径，无外链；图片为 WebP；音乐与音效嵌入允许的 audio-data.js",
+  "文件类型：仅包含 html / css / js / webp，未包含 mp3 或其他白名单外扩展名",
   "端能力：未发现网络请求、Worker、定位、剪贴板、新窗口、iframe 等禁用能力",
   "跨端：Pointer Events、viewport-fit=cover、容器/真机双安全区变量",
-  "声音：默认开启；首次用户轻点解锁；支持分别关闭 BGM/音效及关闭循环",
-  ...warnings.map((warning) => `说明：${warning}`),
+  "声音：首次用户轻点后按需加载 Web Audio；支持分别关闭 BGM/音效及关闭循环",
   `产物：${artifact}`,
   "",
 ].join("\n");

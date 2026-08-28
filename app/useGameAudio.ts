@@ -14,6 +14,8 @@ import {
 } from "react";
 
 export type SfxName = "reveal" | "flag" | "help" | "win" | "lose" | "click";
+type EmbeddedAudioName = "bgm" | SfxName;
+type EmbeddedAudioMap = Record<EmbeddedAudioName, string>;
 
 type AudioSettings = {
   musicEnabled: boolean;
@@ -21,6 +23,12 @@ type AudioSettings = {
   musicLoop: boolean;
   musicVolume: number;
   sfxVolume: number;
+};
+
+type AudioWindow = Window & {
+  __BAKERY_AUDIO__?: EmbeddedAudioMap;
+  __BAKERY_AUDIO_LOADING__?: Promise<EmbeddedAudioMap>;
+  webkitAudioContext?: typeof AudioContext;
 };
 
 const AUDIO_ROOT = "audio";
@@ -45,6 +53,39 @@ const SFX_MIX: Record<SfxName, { gain: number; duck: number; duration: number }>
 
 const SFX_NAMES = Object.keys(SFX_MIX) as SfxName[];
 
+function embeddedAudioBundlePath() {
+  return document.documentElement.dataset.audioBundle ?? "";
+}
+
+function loadEmbeddedAudioData() {
+  const audioWindow = window as AudioWindow;
+  if (audioWindow.__BAKERY_AUDIO__) return Promise.resolve(audioWindow.__BAKERY_AUDIO__);
+  if (audioWindow.__BAKERY_AUDIO_LOADING__) return audioWindow.__BAKERY_AUDIO_LOADING__;
+
+  const bundlePath = embeddedAudioBundlePath();
+  if (!bundlePath) return Promise.reject(new Error("No embedded audio bundle configured"));
+
+  audioWindow.__BAKERY_AUDIO_LOADING__ = new Promise<EmbeddedAudioMap>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = bundlePath;
+    script.async = true;
+    script.addEventListener("load", () => {
+      if (audioWindow.__BAKERY_AUDIO__) resolve(audioWindow.__BAKERY_AUDIO__);
+      else reject(new Error("Embedded audio bundle did not initialize"));
+    }, { once: true });
+    script.addEventListener("error", () => reject(new Error("Embedded audio bundle failed to load")), { once: true });
+    document.head.append(script);
+  });
+  return audioWindow.__BAKERY_AUDIO_LOADING__;
+}
+
+function decodeBase64Audio(base64: string) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
+}
+
 function useGameAudioController(gamePaused = false) {
   const [musicEnabled, setMusicEnabled] = useState(DEFAULT_SETTINGS.musicEnabled);
   const [sfxEnabled, setSfxEnabled] = useState(DEFAULT_SETTINGS.sfxEnabled);
@@ -54,18 +95,118 @@ function useGameAudioController(gamePaused = false) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
 
+  const embeddedModeRef = useRef(false);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const sfxRef = useRef<Partial<Record<SfxName, HTMLAudioElement>>>({});
+  const webAudioRef = useRef<AudioContext | null>(null);
+  const webBgmGainRef = useRef<GainNode | null>(null);
+  const webBgmSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const webBgmStartingRef = useRef<Promise<void> | null>(null);
+  const webBuffersRef = useRef<Partial<Record<EmbeddedAudioName, AudioBuffer>>>({});
+  const webSfxSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const duckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const warmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const warmIdleRef = useRef<number | null>(null);
   const sfxWarmScheduledRef = useRef(false);
   const unlockedRef = useRef(false);
   const duckFactorRef = useRef(1);
+  const gamePausedRef = useRef(gamePaused);
   const musicEnabledRef = useRef(musicEnabled);
   const sfxEnabledRef = useRef(sfxEnabled);
+  const musicLoopRef = useRef(musicLoop);
   const musicVolumeRef = useRef(musicVolume);
   const sfxVolumeRef = useRef(sfxVolume);
+
+  const ensureWebAudioContext = useCallback(() => {
+    let context = webAudioRef.current;
+    if (!context) {
+      const audioWindow = window as AudioWindow;
+      const AudioContextClass = window.AudioContext ?? audioWindow.webkitAudioContext;
+      if (!AudioContextClass) throw new Error("Web Audio is unavailable");
+      context = new AudioContextClass();
+      const bgmGain = context.createGain();
+      bgmGain.connect(context.destination);
+      webAudioRef.current = context;
+      webBgmGainRef.current = bgmGain;
+    }
+    if (context.state === "suspended") void context.resume().catch(() => undefined);
+    return context;
+  }, []);
+
+  const updateWebBgmGain = useCallback(() => {
+    const context = webAudioRef.current;
+    const gain = webBgmGainRef.current;
+    if (!context || !gain) return;
+    const volume = musicEnabledRef.current && !gamePausedRef.current
+      ? Math.min(1, musicVolumeRef.current * duckFactorRef.current)
+      : 0;
+    gain.gain.setValueAtTime(volume, context.currentTime);
+  }, []);
+
+  const decodeEmbeddedAudio = useCallback(async (name: EmbeddedAudioName) => {
+    const cached = webBuffersRef.current[name];
+    if (cached) return cached;
+    const context = ensureWebAudioContext();
+    const audioData = await loadEmbeddedAudioData();
+    const buffer = await context.decodeAudioData(decodeBase64Audio(audioData[name]));
+    webBuffersRef.current[name] = buffer;
+    return buffer;
+  }, [ensureWebAudioContext]);
+
+  const startEmbeddedBgm = useCallback(() => {
+    if (webBgmSourceRef.current || webBgmStartingRef.current || gamePausedRef.current || !musicEnabledRef.current) return;
+    ensureWebAudioContext();
+    webBgmStartingRef.current = (async () => {
+      const context = ensureWebAudioContext();
+      const buffer = await decodeEmbeddedAudio("bgm");
+      if (webBgmSourceRef.current || gamePausedRef.current || !musicEnabledRef.current) return;
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = musicLoopRef.current;
+      source.connect(webBgmGainRef.current!);
+      source.addEventListener("ended", () => {
+        if (webBgmSourceRef.current === source) webBgmSourceRef.current = null;
+      });
+      webBgmSourceRef.current = source;
+      updateWebBgmGain();
+      source.start();
+    })().catch(() => undefined).finally(() => {
+      webBgmStartingRef.current = null;
+    });
+  }, [decodeEmbeddedAudio, ensureWebAudioContext, updateWebBgmGain]);
+
+  const duckBgm = useCallback((factor: number, duration: number) => {
+    if (!musicEnabledRef.current || factor >= 1) return;
+    if (duckTimerRef.current) clearTimeout(duckTimerRef.current);
+    duckFactorRef.current = factor;
+    if (bgmRef.current) bgmRef.current.volume = Math.min(1, musicVolumeRef.current * factor);
+    updateWebBgmGain();
+    duckTimerRef.current = setTimeout(() => {
+      duckFactorRef.current = 1;
+      if (bgmRef.current) bgmRef.current.volume = musicVolumeRef.current;
+      updateWebBgmGain();
+    }, duration);
+  }, [updateWebBgmGain]);
+
+  const warmSfx = useCallback(() => {
+    if (sfxWarmScheduledRef.current) return;
+    sfxWarmScheduledRef.current = true;
+    const warm = () => {
+      if (embeddedModeRef.current) {
+        void Promise.all(SFX_NAMES.map((name) => decodeEmbeddedAudio(name))).catch(() => undefined);
+        return;
+      }
+      SFX_NAMES.forEach((name) => {
+        if (sfxRef.current[name]) return;
+        const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
+        sound.preload = "auto";
+        sound.load();
+        sfxRef.current[name] = sound;
+      });
+    };
+    if ("requestIdleCallback" in window) warmIdleRef.current = window.requestIdleCallback(warm, { timeout: 1200 });
+    else warmTimerRef.current = setTimeout(warm, 220);
+  }, [decodeEmbeddedAudio]);
 
   useEffect(() => {
     try {
@@ -85,15 +226,20 @@ function useGameAudioController(gamePaused = false) {
   }, []);
 
   useEffect(() => {
-    const bgm = new Audio();
-    bgm.preload = "none";
-    bgm.loop = musicLoop;
-    bgm.volume = musicVolume;
-    bgmRef.current = bgm;
-
+    embeddedModeRef.current = Boolean(embeddedAudioBundlePath());
+    if (!embeddedModeRef.current) {
+      const bgm = new Audio();
+      bgm.preload = "none";
+      bgm.loop = musicLoopRef.current;
+      bgm.volume = musicVolumeRef.current;
+      bgmRef.current = bgm;
+    }
     return () => {
-      bgm.pause();
+      bgmRef.current?.pause();
       Object.values(sfxRef.current).forEach((sound) => sound?.pause());
+      webBgmSourceRef.current?.stop();
+      webSfxSourcesRef.current.forEach((source) => source.stop());
+      if (webAudioRef.current) void webAudioRef.current.close().catch(() => undefined);
       if (duckTimerRef.current) clearTimeout(duckTimerRef.current);
       if (warmTimerRef.current) clearTimeout(warmTimerRef.current);
       if (warmIdleRef.current !== null && "cancelIdleCallback" in window) window.cancelIdleCallback(warmIdleRef.current);
@@ -101,98 +247,122 @@ function useGameAudioController(gamePaused = false) {
   }, []);
 
   useEffect(() => {
+    gamePausedRef.current = gamePaused;
     musicEnabledRef.current = musicEnabled;
     sfxEnabledRef.current = sfxEnabled;
+    musicLoopRef.current = musicLoop;
     musicVolumeRef.current = musicVolume;
     sfxVolumeRef.current = sfxVolume;
 
-    const bgm = bgmRef.current;
-    if (bgm) {
-      bgm.loop = musicLoop;
-      bgm.volume = Math.min(1, musicVolume * duckFactorRef.current);
-      if (!musicEnabled || gamePaused) bgm.pause();
-      else if (unlockedRef.current) {
-        if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
-        void bgm.play().catch(() => undefined);
+    if (embeddedModeRef.current) {
+      if (webBgmSourceRef.current) webBgmSourceRef.current.loop = musicLoop;
+      updateWebBgmGain();
+      const context = webAudioRef.current;
+      if (context) {
+        if (gamePaused) void context.suspend().catch(() => undefined);
+        else if (unlockedRef.current) {
+          void context.resume().catch(() => undefined);
+          if (musicEnabled) startEmbeddedBgm();
+        }
+      }
+    } else {
+      const bgm = bgmRef.current;
+      if (bgm) {
+        bgm.loop = musicLoop;
+        bgm.volume = Math.min(1, musicVolume * duckFactorRef.current);
+        if (!musicEnabled || gamePaused) bgm.pause();
+        else if (unlockedRef.current) {
+          if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+          void bgm.play().catch(() => undefined);
+        }
       }
     }
-
     if (settingsReady) {
       const settings: AudioSettings = { musicEnabled, sfxEnabled, musicLoop, musicVolume, sfxVolume };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     }
-  }, [gamePaused, musicEnabled, musicLoop, musicVolume, settingsReady, sfxEnabled, sfxVolume]);
+  }, [gamePaused, musicEnabled, musicLoop, musicVolume, settingsReady, sfxEnabled, sfxVolume, startEmbeddedBgm, updateWebBgmGain]);
 
   useEffect(() => {
     const handleVisibility = () => {
+      if (embeddedModeRef.current) {
+        const context = webAudioRef.current;
+        if (!context) return;
+        if (document.hidden) void context.suspend().catch(() => undefined);
+        else if (!gamePausedRef.current && unlockedRef.current) {
+          void context.resume().catch(() => undefined);
+          startEmbeddedBgm();
+        }
+        return;
+      }
       const bgm = bgmRef.current;
       if (!bgm) return;
       if (document.hidden) bgm.pause();
-      else if (!gamePaused && unlockedRef.current && musicEnabledRef.current) void bgm.play().catch(() => undefined);
+      else if (!gamePausedRef.current && unlockedRef.current && musicEnabledRef.current) void bgm.play().catch(() => undefined);
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [gamePaused]);
-
-  const warmSfx = useCallback(() => {
-    if (sfxWarmScheduledRef.current) return;
-    sfxWarmScheduledRef.current = true;
-
-    const warm = () => {
-      SFX_NAMES.forEach((name) => {
-        if (sfxRef.current[name]) return;
-        const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
-        sound.preload = "auto";
-        sound.load();
-        sfxRef.current[name] = sound;
-      });
-    };
-
-    if ("requestIdleCallback" in window) {
-      warmIdleRef.current = window.requestIdleCallback(warm, { timeout: 1200 });
-    } else {
-      warmTimerRef.current = setTimeout(warm, 220);
-    }
-  }, []);
+  }, [startEmbeddedBgm]);
 
   const unlockAudio = useCallback(() => {
     if (!unlockedRef.current) {
       unlockedRef.current = true;
       setAudioUnlocked(true);
     }
-    const bgm = bgmRef.current;
-    if (bgm && !gamePaused && musicEnabledRef.current && bgm.paused) {
-      if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
-      void bgm.play().catch(() => undefined);
+    if (embeddedModeRef.current) {
+      try {
+        ensureWebAudioContext();
+        startEmbeddedBgm();
+      } catch {
+        // The settings UI remains available if a very old WebView lacks Web Audio.
+      }
+    } else {
+      const bgm = bgmRef.current;
+      if (bgm && !gamePausedRef.current && musicEnabledRef.current && bgm.paused) {
+        if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+        void bgm.play().catch(() => undefined);
+      }
     }
     warmSfx();
-  }, [gamePaused, warmSfx]);
+  }, [ensureWebAudioContext, startEmbeddedBgm, warmSfx]);
 
   const playSfx = useCallback((name: SfxName) => {
     if (!sfxEnabledRef.current) return;
+    const mix = SFX_MIX[name];
+    if (embeddedModeRef.current) {
+      try {
+        const context = ensureWebAudioContext();
+        void decodeEmbeddedAudio(name).then((buffer) => {
+          if (!sfxEnabledRef.current || gamePausedRef.current) return;
+          const source = context.createBufferSource();
+          const gain = context.createGain();
+          source.buffer = buffer;
+          gain.gain.value = Math.min(1, sfxVolumeRef.current * mix.gain);
+          source.connect(gain);
+          gain.connect(context.destination);
+          source.addEventListener("ended", () => webSfxSourcesRef.current.delete(source));
+          webSfxSourcesRef.current.add(source);
+          source.start();
+          duckBgm(mix.duck, mix.duration);
+        }).catch(() => undefined);
+      } catch {
+        // Ignore audio on WebViews without Web Audio rather than blocking the game.
+      }
+      return;
+    }
+
     let sound = sfxRef.current[name];
     if (!sound) {
       sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
       sound.preload = "none";
       sfxRef.current[name] = sound;
     }
-
-    const mix = SFX_MIX[name];
     sound.pause();
     sound.currentTime = 0;
     sound.volume = Math.min(1, sfxVolumeRef.current * mix.gain);
     void sound.play().catch(() => undefined);
-
-    const bgm = bgmRef.current;
-    if (!bgm || !musicEnabledRef.current || mix.duck >= 1) return;
-    if (duckTimerRef.current) clearTimeout(duckTimerRef.current);
-    duckFactorRef.current = mix.duck;
-    bgm.volume = Math.min(1, musicVolumeRef.current * mix.duck);
-    duckTimerRef.current = setTimeout(() => {
-      duckFactorRef.current = 1;
-      if (bgmRef.current) bgmRef.current.volume = musicVolumeRef.current;
-    }, mix.duration);
-  }, []);
+    duckBgm(mix.duck, mix.duration);
+  }, [decodeEmbeddedAudio, duckBgm, ensureWebAudioContext]);
 
   return {
     audioUnlocked,
@@ -212,10 +382,7 @@ function useGameAudioController(gamePaused = false) {
 }
 
 type GameAudioApi = ReturnType<typeof useGameAudioController>;
-type SharedGameAudio = GameAudioApi & {
-  setSharedPaused: Dispatch<SetStateAction<boolean>>;
-};
-
+type SharedGameAudio = GameAudioApi & { setSharedPaused: Dispatch<SetStateAction<boolean>> };
 const GameAudioContext = createContext<SharedGameAudio | null>(null);
 
 export function GameAudioProvider({ children }: { children: ReactNode }) {
@@ -227,16 +394,11 @@ export function GameAudioProvider({ children }: { children: ReactNode }) {
 export function useGameAudio(gamePaused = false) {
   const shared = useContext(GameAudioContext);
   const setSharedPaused = shared?.setSharedPaused;
-
   useEffect(() => {
     if (!setSharedPaused) return;
     setSharedPaused(gamePaused);
     return () => setSharedPaused(false);
   }, [gamePaused, setSharedPaused]);
-
-  if (!shared) {
-    throw new Error("useGameAudio must be used inside GameAudioProvider");
-  }
-
+  if (!shared) throw new Error("useGameAudio must be used inside GameAudioProvider");
   return shared as GameAudioApi;
 }
