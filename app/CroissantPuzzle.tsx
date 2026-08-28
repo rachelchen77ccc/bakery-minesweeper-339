@@ -21,7 +21,10 @@ type LevelConfig = {
   size: number;
   mistakeLimit: number;
   tools: ToolCounts;
+  tier: string;
 };
+
+type LevelVictory = { badge: string; title: string; copy: string };
 
 const ASSET_ROOT = "assets";
 const PUZZLE_TUTORIAL_KEY = "croissant-platter-tutorial-v2-complete";
@@ -29,18 +32,33 @@ const PUZZLE_PROGRESS_KEY = "croissant-platter-unlocked";
 const REGION_COLORS = ["#f9dfcf", "#f8eab8", "#dcebcf", "#d9e9ec", "#e2ddf1", "#f2d9e4", "#e6d6c5", "#d8eadf"];
 
 const LEVELS: LevelConfig[] = [
-  { size: 4, mistakeLimit: 5, tools: { scan: 2, tidy: 1, intuition: 1 } },
-  { size: 4, mistakeLimit: 4, tools: { scan: 2, tidy: 1, intuition: 1 } },
-  { size: 5, mistakeLimit: 4, tools: { scan: 2, tidy: 2, intuition: 1 } },
-  { size: 5, mistakeLimit: 4, tools: { scan: 2, tidy: 2, intuition: 1 } },
-  { size: 5, mistakeLimit: 3, tools: { scan: 2, tidy: 2, intuition: 1 } },
-  { size: 6, mistakeLimit: 3, tools: { scan: 3, tidy: 2, intuition: 2 } },
-  { size: 6, mistakeLimit: 3, tools: { scan: 3, tidy: 2, intuition: 2 } },
-  { size: 6, mistakeLimit: 2, tools: { scan: 3, tidy: 2, intuition: 2 } },
-  { size: 7, mistakeLimit: 2, tools: { scan: 3, tidy: 2, intuition: 2 } },
-  { size: 7, mistakeLimit: 2, tools: { scan: 4, tidy: 3, intuition: 2 } },
-  { size: 8, mistakeLimit: 2, tools: { scan: 4, tidy: 3, intuition: 2 } },
-  { size: 8, mistakeLimit: 1, tools: { scan: 4, tidy: 3, intuition: 2 } },
+  { size: 4, mistakeLimit: 4, tools: { scan: 2, tidy: 1, intuition: 1 }, tier: "热身" },
+  { size: 4, mistakeLimit: 3, tools: { scan: 1, tidy: 1, intuition: 1 }, tier: "热身+" },
+  { size: 5, mistakeLimit: 3, tools: { scan: 2, tidy: 1, intuition: 1 }, tier: "熟练" },
+  { size: 5, mistakeLimit: 3, tools: { scan: 1, tidy: 1, intuition: 1 }, tier: "熟练+" },
+  { size: 5, mistakeLimit: 2, tools: { scan: 1, tidy: 1, intuition: 0 }, tier: "进阶" },
+  { size: 6, mistakeLimit: 2, tools: { scan: 2, tidy: 1, intuition: 1 }, tier: "进阶" },
+  { size: 6, mistakeLimit: 2, tools: { scan: 1, tidy: 1, intuition: 1 }, tier: "进阶+" },
+  { size: 6, mistakeLimit: 1, tools: { scan: 1, tidy: 1, intuition: 0 }, tier: "烧脑" },
+  { size: 7, mistakeLimit: 1, tools: { scan: 2, tidy: 1, intuition: 1 }, tier: "烧脑" },
+  { size: 7, mistakeLimit: 1, tools: { scan: 1, tidy: 1, intuition: 0 }, tier: "烧脑+" },
+  { size: 8, mistakeLimit: 1, tools: { scan: 1, tidy: 0, intuition: 0 }, tier: "主厨" },
+  { size: 8, mistakeLimit: 1, tools: { scan: 1, tidy: 0, intuition: 0 }, tier: "终极" },
+];
+
+const LEVEL_VICTORIES: LevelVictory[] = [
+  { badge: "FIRST PLATE", title: "第一盘，稳稳端上桌！", copy: "小温找到节奏了，小顾在旁边认真记住了每一步。" },
+  { badge: "SWEET START", title: "热身完成，贴贴庆祝！", copy: "四乘四已经难不住你，他们决定再多烤一盘。" },
+  { badge: "COLOR MASTER", title: "颜色区域全部理顺啦", copy: "每种颜色都刚刚好，339 给你的摆盘打了满分。" },
+  { badge: "PERFECT LINES", title: "行列整整齐齐！", copy: "小顾负责端盘，小温负责偷偷奖励你一只牛角包。" },
+  { badge: "NO HINT NEEDED", title: "进阶订单也完成了", copy: "少一次直觉帮助，你依然靠推理找到了全部位置。" },
+  { badge: "BIGGER PLATE", title: "六乘六，漂亮收官！", copy: "餐盘变大了，默契也升级了，下一单正在等你。" },
+  { badge: "TEAM WORK", title: "三个人的配合刚刚好", copy: "339 扫描方向，小顾整理线索，小温等你端来成品。" },
+  { badge: "SHARP LOGIC", title: "烧脑关也被你拿下！", copy: "相邻陷阱一个都没骗到你，贴贴时间延长十秒。" },
+  { badge: "SEVEN COLORS", title: "七种颜色，各就各位", copy: "这一盘像彩色拼图，也像他们今天最满意的作品。" },
+  { badge: "ALMOST CHEF", title: "离主厨只差一步了", copy: "有限的帮助也够用，因为最可靠的线索一直在你手里。" },
+  { badge: "MASTER PLATE", title: "八乘八主厨认证！", copy: "小顾和小温已经贴在一起等你宣布最后一关开始。" },
+  { badge: "FINAL ORDER", title: "终极订单完成，今日满分！", copy: "十二张餐盘全部完成：牛角包、贴贴和掌声都归你。" },
 ];
 
 const solutionCache = new Map<number, number[][]>();
@@ -453,6 +471,17 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     vibrate(14);
   };
 
+  const restartCurrentPuzzle = () => {
+    if (tutorialStep !== null) return;
+    if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    endDrag();
+    resetBoard(levelIndex, variant);
+    setMessage("本局已重新开始：餐盘和系统给定位置保持不变，请从第一步重新推理。");
+    playSfx("click");
+    vibrate(14);
+  };
+
   const chooseLevel = (index: number) => {
     if (index + 1 > unlockedLevel) return;
     playSfx("click");
@@ -532,6 +561,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   const placedCount = marks.filter((mark) => mark === 2).length;
   const conflictTypes = useMemo(() => conflictTypesFor(marks, config.size, puzzle.regions), [config.size, marks, puzzle.regions]);
   const allMuted = !musicEnabled && !sfxEnabled;
+  const victory = LEVEL_VICTORIES[levelIndex];
 
   return (
     <main className={`game-shell platter-shell ${!tutorialReady || tutorialStep !== null ? "tutorial-active" : ""}`} onPointerDown={unlockAudio}>
@@ -614,7 +644,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         </div>
 
         <div className="platter-action-row">
-          <p className="platter-gesture-tip">单击 × · 双击摆放 · 按住滑动批量 ×</p>
+          <button className="platter-restart pressable" onClick={restartCurrentPuzzle} disabled={tutorialStep !== null || status === "won"}><span>↻</span><b>本局重来</b><small>保留当前餐盘</small></button>
           <button className="platter-undo pressable" onClick={undoLastAction} disabled={!undoSnapshot || status === "won" || tutorialStep !== null}><span>↶</span><b>撤回一步</b><small>{undoSnapshot ? "恢复棋盘与失误" : "暂无记录"}</small></button>
         </div>
 
@@ -628,11 +658,11 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
 
         {(status === "won" || status === "failed") && (
           <section className={`platter-result ${status}`} role="status">
-            <img src={`${ASSET_ROOT}/${status === "won" ? "success-bakery.jpg" : "xiaowen.png"}`} alt="" />
-            <div><small>{status === "won" ? "LEVEL CLEAR" : "TRY A NEW PLATE"}</small><h2>{status === "won" ? `第 ${levelIndex + 1} 关完成！` : "摆盘需要调整一下"}</h2><p>{status === "won" ? "每个区域和每行每列都刚刚好。" : "重试会生成同尺寸、但颜色区域不同的新棋盘。"}</p></div>
+            {status === "won" ? <div className="platter-result-art"><img src={`${ASSET_ROOT}/couple-sticker.png`} alt="小顾和小温贴贴庆祝" /></div> : <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />}
+            <div><small>{status === "won" ? victory.badge : "TRY AGAIN"}</small><h2>{status === "won" ? victory.title : "摆盘需要调整一下"}</h2><p>{status === "won" ? victory.copy : "保留这张餐盘，从系统给定的第一个牛角包重新推理。"}</p></div>
             <div className="result-actions">
               {status === "failed" && undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastAction}>撤回这步</button>}
-              {status === "won" && levelIndex < 11 ? <button className="result-button pressable" onClick={() => resetBoard(levelIndex + 1, 0)}>下一关</button> : status === "won" ? <button className="result-button pressable" onClick={() => setShowLevelPicker(true)}>查看全部关卡</button> : <button className="result-button pressable" onClick={() => resetBoard(levelIndex, variant + 1)}>换盘重试</button>}
+              {status === "won" && levelIndex < 11 ? <button className="result-button pressable" onClick={() => resetBoard(levelIndex + 1, 0)}>下一关</button> : status === "won" ? <button className="result-button pressable" onClick={() => setShowLevelPicker(true)}>查看全部关卡</button> : <button className="result-button pressable" onClick={restartCurrentPuzzle}>本局重来</button>}
             </div>
           </section>
         )}
@@ -647,7 +677,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
           {tutorialStep === 2 && <><h2>② 单击标记“不能放”</h2><p>高亮格紧挨着已有牛角包，斜角相邻也不允许，所以这里肯定不能放。单击它打 ×。</p><span className="tutorial-wait">等待你单击棋盘中央的高亮格…</span></>}
           {tutorialStep === 3 && <><h2>③ 滑动可以连续排除</h2><p>这 3 格与已有牛角包在同一列。按住第一格并向下划过，系统会自动补齐中间经过的格子。</p><span className="tutorial-wait">等待你按住并滑过 3 格…</span></>}
           {tutorialStep === 4 && <><h2>④ 双击摆放下一个</h2><p>排除后，高亮位置满足颜色、行列和不相邻三条规则。请快速双击摆下牛角包。</p><span className="tutorial-wait">等待你双击高亮格…</span></>}
-          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>棋盘、失误次数和道具都会一起恢复</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>高亮一行、列或区域，提示推理方向</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除已经确定不能放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>如果摆放冲突，对应规则会变红并写清原因。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
+          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>棋盘、失误次数和道具都会一起恢复</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>高亮一行、列或区域，提示推理方向</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除已经确定不能放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>冲突会写清原因；想从头推理时，点“本局重来”，当前餐盘不会改变。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
           {tutorialStep === 6 && <><h2>现在开始第 1 关吧！</h2><p>系统已经替你放好第一个牛角包。先给它同颜色、同行列和相邻的位置打 ×，再继续推理。</p><button className="tutorial-button pressable" onClick={finishTutorial}>进入正式关卡</button></>}
         </section>
       )}
@@ -663,7 +693,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
             <div className="level-grid">
               {LEVELS.map((level, index) => {
                 const locked = index + 1 > unlockedLevel;
-                return <button key={index} className={`level-tile pressable ${index === levelIndex ? "current" : ""}`} disabled={locked} onClick={() => chooseLevel(index)}><b>{locked ? "🔒" : index + 1}</b><small>{level.size}×{level.size}</small></button>;
+                return <button key={index} className={`level-tile pressable ${index === levelIndex ? "current" : ""}`} disabled={locked} onClick={() => chooseLevel(index)}><b>{locked ? "🔒" : index + 1}</b><small>{level.size}×{level.size} · {level.tier}</small></button>;
               })}
             </div>
           </section>
@@ -676,7 +706,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
             <button className="modal-close pressable" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
             <span className="mission-tag">摆盘规则</span><h2>三个条件要同时满足</h2>
-            <ol><li><b>开局给定</b>：系统先放好一个带星标的牛角包，它不能拿走，是整盘推理的起点。</li><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击立即打 ×，双击摆放或拿走；按住或直接滑动会连续补齐 ×。</li><li><b>错误与撤回</b>：冲突格和对应规则会变红并说明原因；“撤回一步”会一起恢复棋盘、失误和道具。</li></ol>
+            <ol><li><b>开局给定</b>：系统先放好一个带星标的牛角包，它不能拿走，是整盘推理的起点。</li><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击立即打 ×，双击摆放或拿走；按住或直接滑动会连续补齐 ×。</li><li><b>撤回与重来</b>：“撤回一步”恢复最近操作；“本局重来”保留当前餐盘和给定位置，从第一步重新推理。</li></ol>
             <button className="primary-button pressable" onClick={() => setShowRules(false)}>继续摆盘</button>
           </section>
         </div>
