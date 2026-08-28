@@ -545,7 +545,7 @@ export default function Home() {
             )}
             <div><strong>{status === "won" ? "早餐约会达成！" : "这炉烤过头啦"}</strong><p>{status === "won" ? `用时 ${seconds} 秒，完成扫雷并收集了全部 ${breakfastGoal} 份早餐。` : "别担心，第一格永远安全，再试一次吧。"}</p></div>
             <div className="result-actions">
-              {undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastStep}>撤销上一步</button>}
+              {status === "lost" && undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastStep}>撤销上一步</button>}
               <button className="result-button pressable" onClick={() => restart()}>{status === "won" ? "再送一份" : "重新烘焙"}</button>
             </div>
           </div>
