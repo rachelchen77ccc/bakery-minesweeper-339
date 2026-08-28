@@ -32,7 +32,7 @@ const SFX_MIX: Record<SfxName, { gain: number; duck: number; duration: number }>
   click: { gain: 0.82, duck: 1, duration: 180 },
 };
 
-export function useGameAudio() {
+export function useGameAudio(gamePaused = false) {
   const [musicEnabled, setMusicEnabled] = useState(DEFAULT_SETTINGS.musicEnabled);
   const [sfxEnabled, setSfxEnabled] = useState(DEFAULT_SETTINGS.sfxEnabled);
   const [musicLoop, setMusicLoop] = useState(DEFAULT_SETTINGS.musicLoop);
@@ -99,7 +99,7 @@ export function useGameAudio() {
     if (bgm) {
       bgm.loop = musicLoop;
       bgm.volume = Math.min(1, musicVolume * duckFactorRef.current);
-      if (!musicEnabled) bgm.pause();
+      if (!musicEnabled || gamePaused) bgm.pause();
       else if (unlockedRef.current) void bgm.play().catch(() => undefined);
     }
 
@@ -107,18 +107,18 @@ export function useGameAudio() {
       const settings: AudioSettings = { musicEnabled, sfxEnabled, musicLoop, musicVolume, sfxVolume };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     }
-  }, [musicEnabled, musicLoop, musicVolume, settingsReady, sfxEnabled, sfxVolume]);
+  }, [gamePaused, musicEnabled, musicLoop, musicVolume, settingsReady, sfxEnabled, sfxVolume]);
 
   useEffect(() => {
     const handleVisibility = () => {
       const bgm = bgmRef.current;
       if (!bgm) return;
       if (document.hidden) bgm.pause();
-      else if (unlockedRef.current && musicEnabledRef.current) void bgm.play().catch(() => undefined);
+      else if (!gamePaused && unlockedRef.current && musicEnabledRef.current) void bgm.play().catch(() => undefined);
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, []);
+  }, [gamePaused]);
 
   const unlockAudio = useCallback(() => {
     if (!unlockedRef.current) {
@@ -126,8 +126,8 @@ export function useGameAudio() {
       setAudioUnlocked(true);
     }
     const bgm = bgmRef.current;
-    if (bgm && musicEnabledRef.current && bgm.paused) void bgm.play().catch(() => undefined);
-  }, []);
+    if (bgm && !gamePaused && musicEnabledRef.current && bgm.paused) void bgm.play().catch(() => undefined);
+  }, [gamePaused]);
 
   const playSfx = useCallback((name: SfxName) => {
     if (!sfxEnabledRef.current) return;

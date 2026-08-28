@@ -131,6 +131,7 @@ export default function Home() {
   const [message, setMessage] = useState("小顾出发啦！帮小温找到最喜欢的牛角包。");
   const [showHelp, setShowHelp] = useState(false);
   const [showAudioSettings, setShowAudioSettings] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [best, setBest] = useState<number | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressClickUntil = useRef(0);
@@ -148,7 +149,7 @@ export default function Home() {
     sfxEnabled,
     sfxVolume,
     unlockAudio,
-  } = useGameAudio();
+  } = useGameAudio(isPaused);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(`bakery-best-${difficulty}`);
@@ -161,10 +162,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (status !== "playing") return;
+    if (status !== "playing" || isPaused) return;
     const timer = window.setInterval(() => setSeconds((value) => Math.min(value + 1, 999)), 1000);
     return () => window.clearInterval(timer);
-  }, [status]);
+  }, [isPaused, status]);
 
   const restart = useCallback((nextDifficulty: DifficultyKey = difficulty) => {
     playSfx("click");
@@ -178,6 +179,7 @@ export default function Home() {
     setFlagMode(false);
     setScanUsed(false);
     setHintCell(null);
+    setIsPaused(false);
     setMessage("小顾出发啦！帮小温找到最喜欢的牛角包。");
   }, [difficulty, playSfx]);
 
@@ -204,7 +206,7 @@ export default function Home() {
   }, [difficulty, playSfx]);
 
   const reveal = useCallback((index: number) => {
-    if (status === "won" || status === "lost") return;
+    if (status === "won" || status === "lost" || isPaused) return;
     let working = cells;
     if (!generated) {
       working = buildBoard(config.rows, config.cols, config.mines, breakfastGoal - 1, index);
@@ -236,10 +238,10 @@ export default function Home() {
     }
     if (next.every((cell) => cell.mine || cell.revealed)) finishWin(seconds);
     else playSfx("reveal");
-  }, [breakfastGoal, cells, config, finishWin, generated, playSfx, seconds, status]);
+  }, [breakfastGoal, cells, config, finishWin, generated, isPaused, playSfx, seconds, status]);
 
   const toggleFlag = useCallback((index: number) => {
-    if (status === "won" || status === "lost" || cells[index].revealed) return;
+    if (status === "won" || status === "lost" || isPaused || cells[index].revealed) return;
     if (!cells[index].flagged && flagsUsed >= config.mines) {
       setMessage("小顾贴纸已经用完啦。再检查一下标记的位置吧！");
       return;
@@ -250,17 +252,17 @@ export default function Home() {
     setMessage(cells[index].flagged ? "收回一张小顾贴纸。" : "小顾贴纸：这里可能有烤焦面包！" );
     playSfx("flag");
     vibrate(22);
-  }, [cells, config.mines, flagsUsed, playSfx, status]);
+  }, [cells, config.mines, flagsUsed, isPaused, playSfx, status]);
 
   const handleCellClick = (index: number) => {
-    if (hintCell !== null) return;
+    if (hintCell !== null || isPaused) return;
     if (Date.now() < suppressClickUntil.current) return;
     if (flagMode) toggleFlag(index);
     else reveal(index);
   };
 
   const beginLongPress = (index: number) => {
-    if (hintCell !== null) return;
+    if (hintCell !== null || isPaused) return;
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
     longPressTimer.current = setTimeout(() => {
       toggleFlag(index);
@@ -280,7 +282,7 @@ export default function Home() {
   };
 
   const useScan = () => {
-    if (scanUsed) return;
+    if (scanUsed || isPaused) return;
     playSfx("help");
     if (!generated) {
       setMessage("339：先翻开一格，我才能校准安全扫描。");
@@ -307,6 +309,14 @@ export default function Home() {
     : status === "lost"
       ? "小顾：没关系，我们再烤一炉。"
       : message;
+
+  const postcardLine = status === "won"
+    ? "牛角包约会达成 ♡"
+    : status === "lost"
+      ? "休息一下，再烤一炉"
+      : status === "playing"
+        ? `早餐进度 ${breakfastFound}/${breakfastGoal}`
+        : "今天也一起寻找早餐";
 
   return (
     <main className="game-shell" onPointerDown={unlockAudio}>
@@ -361,7 +371,12 @@ export default function Home() {
       <section className={`game-panel ${status}`} aria-label="心动烘焙扫雷棋盘">
         <div className="window-bar">
           <span><i /> BAKERY_MAP.EXE</span>
-          <div className="window-controls"><b>—</b><b>□</b><b>×</b></div>
+          <button
+            className="pause-button pressable"
+            onClick={() => { playSfx("click"); setIsPaused(true); }}
+            disabled={status !== "playing" || hintCell !== null}
+            aria-label="暂停游戏"
+          ><b>Ⅱ</b> 暂停</button>
         </div>
 
         <div className="status-row">
@@ -420,7 +435,10 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="tip-line"><span>手机：轻点翻格 · 长按贴小顾</span><span>电脑：左键翻格 · 右键贴小顾</span></div>
+        <section className="story-postcard" aria-label="小顾和小温的烘焙约会">
+          <img src={`${ASSET_ROOT}/date-postcard.jpg`} alt="小顾和小温依偎在一起" />
+          <div><span>BAKERY DATE</span><b>小顾 × 小温</b><small>{postcardLine}</small></div>
+        </section>
 
         {(status === "won" || status === "lost") && (
           <div className={`result-card ${status}`} role="status">
@@ -444,6 +462,20 @@ export default function Home() {
       </section>
 
       <footer><span>DESIGNED FOR 小顾 × 小温</span><span>GUARDED BY 339</span></footer>
+
+      {isPaused && (
+        <div className="pause-backdrop">
+          <section className="pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+            <img src={`${ASSET_ROOT}/pause-couple.jpg`} alt="小顾抱着小温" />
+            <div className="pause-copy">
+              <span>BAKERY BREAK</span>
+              <h2 id="pause-title">先靠一会儿吧</h2>
+              <p>本局时间已经停住，早餐会在这里等你。</p>
+              <button className="resume-button pressable" onClick={() => { playSfx("click"); setIsPaused(false); }}>继续寻找牛角包</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {showHelp && (
         <div className="modal-backdrop" onMouseDown={closeHelp}>
