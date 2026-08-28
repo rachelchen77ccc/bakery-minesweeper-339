@@ -13,7 +13,6 @@ type PuzzleSnapshot = {
   marks: PuzzleMark[];
   mistakes: number;
   status: PuzzleStatus;
-  tools: ToolCounts;
   message: string;
 };
 
@@ -191,6 +190,8 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   const [showRules, setShowRules] = useState(false);
   const [message, setMessage] = useState("系统已放好第一个牛角包。请从它所在的颜色、行列和相邻格开始排除。");
   const [scanFocus, setScanFocus] = useState<{ type: "row" | "col" | "region"; value: number } | null>(null);
+  const [scanHintTarget, setScanHintTarget] = useState<number | null>(null);
+  const [tidyHighlights, setTidyHighlights] = useState<Set<number>>(new Set());
   const [tutorialStep, setTutorialStep] = useState<PuzzleTutorialStep>(null);
   const [tutorialReady, setTutorialReady] = useState(false);
   const [showIdleHint, setShowIdleHint] = useState(false);
@@ -220,7 +221,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   }, [config.size, tutorialAutoCol]);
 
   const makeSnapshot = (): PuzzleSnapshot => ({
-    marks: [...marksRef.current], mistakes: mistakesRef.current, status, tools: { ...toolsLeft }, message,
+    marks: [...marksRef.current], mistakes: mistakesRef.current, status, message,
   });
 
   const restoreSnapshot = (snapshot: PuzzleSnapshot, clearHistory = true) => {
@@ -230,8 +231,9 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     setConflicts(conflictsFor(snapshot.marks, config.size, puzzle.regions));
     setMistakes(snapshot.mistakes);
     setStatus(snapshot.status);
-    setToolsLeft({ ...snapshot.tools });
     setScanFocus(null);
+    setScanHintTarget(null);
+    setTidyHighlights(new Set());
     setMessage(clearHistory ? "已撤回最近一次操作。棋盘和失误次数都恢复了。" : snapshot.message);
     if (clearHistory) setUndoSnapshot(null);
   };
@@ -250,6 +252,8 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     setStatus("ready");
     setUndoSnapshot(null);
     setScanFocus(null);
+    setScanHintTarget(null);
+    setTidyHighlights(new Set());
     setShowIdleHint(false);
     hintedRef.current = false;
     setActivityTick((value) => value + 1);
@@ -492,38 +496,58 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   const handleTool = (tool: keyof ToolCounts) => {
     if (tutorialStep !== null || status === "won" || status === "failed" || toolsLeft[tool] <= 0) return;
     registerActivity();
+    const consumeTool = () => setToolsLeft((current) => ({ ...current, [tool]: current[tool] - 1 }));
+
     if (tool === "scan") {
       const candidates = puzzle.solution.map((col, row) => row * config.size + col).filter((index) => marksRef.current[index] !== 2);
       if (!candidates.length) return;
       const target = candidates[0];
       const row = Math.floor(target / config.size);
       const col = target % config.size;
-      const type = (["row", "col", "region"] as const)[toolsLeft.scan % 3];
-      const value = type === "row" ? row : type === "col" ? col : puzzle.regions[target];
-      const label = type === "row" ? `第 ${row + 1} 行` : type === "col" ? `第 ${col + 1} 列` : `颜色区域 ${value + 1}`;
-      setScanFocus({ type, value });
-      setUndoSnapshot(makeSnapshot());
-      setMessage(`339：观察${label}，有一个位置能同时满足三条规则。`);
-      window.setTimeout(() => setScanFocus(null), 2400);
+      setUndoSnapshot(null);
+      setTidyHighlights(new Set());
+      setScanFocus({ type: "row", value: row });
+      setScanHintTarget(target);
+      setMessage(`339 已锁定：第 ${row + 1} 行第 ${col + 1} 列满足三条规则，双击高亮格摆放。`);
+      window.setTimeout(() => { setScanFocus(null); setScanHintTarget(null); }, 3200);
       playSfx("help");
+      vibrate([18, 25, 18]);
+      consumeTool();
+      return;
     }
+
     if (tool === "tidy") {
-      setUndoSnapshot(makeSnapshot());
       const placed = marksRef.current.map((mark, index) => ({ mark, index })).filter(({ mark }) => mark === 2).map(({ index }) => index);
       const next = [...marksRef.current];
+      const newlyCrossed: number[] = [];
       next.forEach((mark, index) => {
         if (mark !== 0) return;
         const row = Math.floor(index / config.size); const col = index % config.size;
         if (placed.some((placedIndex) => {
           const placedRow = Math.floor(placedIndex / config.size); const placedCol = placedIndex % config.size;
           return row === placedRow || col === placedCol || puzzle.regions[index] === puzzle.regions[placedIndex] || (Math.abs(row - placedRow) <= 1 && Math.abs(col - placedCol) <= 1);
-        })) next[index] = 1;
+        })) { next[index] = 1; newlyCrossed.push(index); }
       });
+      if (!newlyCrossed.length) {
+        setMessage("小顾检查完了：目前没有新的格子可以确定排除，道具次数没有消耗。");
+        playSfx("click");
+        return;
+      }
+      setUndoSnapshot(null);
+      setScanFocus(null);
+      setScanHintTarget(null);
       marksRef.current = next;
       setMarks(next);
-      setMessage("小顾把已经能排除的位置都整理好啦。");
+      setStatus("playing");
+      setTidyHighlights(new Set(newlyCrossed));
+      setMessage(`小顾整理完成：一次排除了 ${newlyCrossed.length} 格，闪亮的 × 都是刚刚新增的。`);
+      window.setTimeout(() => setTidyHighlights(new Set()), 2200);
       playSfx("flag");
+      vibrate([16, 20, 16]);
+      consumeTool();
+      return;
     }
+
     if (tool === "intuition") {
       const candidates = puzzle.solution.map((col, row) => row * config.size + col).filter((index) => {
         if (marksRef.current[index] === 2) return false;
@@ -534,13 +558,17 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         setMessage("小温：先把红框里的冲突移开，我就能看清正确位置啦。");
         return;
       }
-      applyMark(candidates[0], 2, false);
+      setUndoSnapshot(null);
+      setScanFocus(null);
+      setScanHintTarget(null);
+      setTidyHighlights(new Set());
+      applyMark(candidates[0], 2, false, false);
       if (!solved(marksRef.current, config.size, puzzle.regions)) {
         setMessage("小温的直觉命中！这里可以安心放牛角包。");
         playSfx("reveal");
       }
+      consumeTool();
     }
-    setToolsLeft((current) => ({ ...current, [tool]: current[tool] - 1 }));
   };
 
   const startTutorial = () => {
@@ -593,9 +621,9 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
           <span className={conflictTypes.has("adjacent") ? "rule-error" : ""}><b>不相邻</b><small>横竖斜都不挨</small></span>
         </div>
 
-        <div className={`puzzle-feedback ${conflicts.size ? "error" : ""}`} role="status">
-          <span>{conflicts.size ? "!" : "✓"}</span>
-          <b>{conflicts.size ? conflictMessage(conflictTypes) : "系统已先放好 1 个。现在根据三条规则排除其他格子。"}</b>
+        <div className={`puzzle-feedback ${conflicts.size ? "error" : ""} ${scanHintTarget !== null || tidyHighlights.size ? "helper" : ""}`} role="status">
+          <span>{conflicts.size ? "!" : scanHintTarget !== null || tidyHighlights.size ? "✦" : "✓"}</span>
+          <b>{conflicts.size ? conflictMessage(conflictTypes) : message}</b>
         </div>
 
         <div
@@ -621,7 +649,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
               <button
                 key={index}
                 data-puzzle-index={index}
-                className={`puzzle-cell ${mark === 1 ? "crossed" : ""} ${mark === 2 ? "has-croissant" : ""} ${index === puzzle.autoCell ? "system-anchor" : ""} ${conflicts.has(index) ? "conflict" : ""} ${tutorialTarget ? "tutorial-target" : ""} ${scanHighlighted ? "scan-focus" : ""}`}
+                className={`puzzle-cell ${mark === 1 ? "crossed" : ""} ${mark === 2 ? "has-croissant" : ""} ${index === puzzle.autoCell ? "system-anchor" : ""} ${conflicts.has(index) ? "conflict" : ""} ${tutorialTarget ? "tutorial-target" : ""} ${scanHighlighted ? "scan-focus" : ""} ${scanHintTarget === index ? "scan-answer" : ""} ${tidyHighlights.has(index) ? "tidy-focus" : ""}`}
                 style={{
                   "--region": REGION_COLORS[region % REGION_COLORS.length],
                   borderTopWidth: topDifferent ? 3 : 1,
@@ -649,8 +677,8 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         </div>
 
         <div className={`platter-tools ${tutorialStep === 5 ? "tutorial-target" : ""}`}>
-          <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>339扫描</b><small>提示一行</small></span><i>{toolsLeft.scan}</i></button>
-          <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><span><b>小顾整理</b><small>批量排除</small></span><i>{toolsLeft.tidy}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>339扫描</b><small>锁定正确格</small></span><i>{toolsLeft.scan}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><span><b>小顾整理</b><small>闪亮批量 ×</small></span><i>{toolsLeft.tidy}</i></button>
           <button className="prop-button pressable" onClick={() => handleTool("intuition")} disabled={toolsLeft.intuition <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><span><b>小温直觉</b><small>摆对一个</small></span><i>{toolsLeft.intuition}</i></button>
         </div>
 
@@ -677,7 +705,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
           {tutorialStep === 2 && <><h2>② 单击标记“不能放”</h2><p>高亮格紧挨着已有牛角包，斜角相邻也不允许，所以这里肯定不能放。单击它打 ×。</p><span className="tutorial-wait">等待你单击棋盘中央的高亮格…</span></>}
           {tutorialStep === 3 && <><h2>③ 滑动可以连续排除</h2><p>这 3 格与已有牛角包在同一列。按住第一格并向下划过，系统会自动补齐中间经过的格子。</p><span className="tutorial-wait">等待你按住并滑过 3 格…</span></>}
           {tutorialStep === 4 && <><h2>④ 双击摆放下一个</h2><p>排除后，高亮位置满足颜色、行列和不相邻三条规则。请快速双击摆下牛角包。</p><span className="tutorial-wait">等待你双击高亮格…</span></>}
-          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>棋盘、失误次数和道具都会一起恢复</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>高亮一行、列或区域，提示推理方向</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除已经确定不能放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>冲突会写清原因；想从头推理时，点“本局重来”，当前餐盘不会改变。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
+          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>只恢复最近一次普通操作，道具次数不会退还</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>直接锁定并高亮一个可以正确摆放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除并闪亮标出本次新增的所有 ×</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>道具一经使用不能撤回；想从头推理时，可点“本局重来”。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
           {tutorialStep === 6 && <><h2>现在开始第 1 关吧！</h2><p>系统已经替你放好第一个牛角包。先给它同颜色、同行列和相邻的位置打 ×，再继续推理。</p><button className="tutorial-button pressable" onClick={finishTutorial}>进入正式关卡</button></>}
         </section>
       )}
@@ -706,7 +734,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
             <button className="modal-close pressable" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
             <span className="mission-tag">摆盘规则</span><h2>三个条件要同时满足</h2>
-            <ol><li><b>开局给定</b>：系统先放好一个带星标的牛角包，它不能拿走，是整盘推理的起点。</li><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击立即打 ×，双击摆放或拿走；按住或直接滑动会连续补齐 ×。</li><li><b>撤回与重来</b>：“撤回一步”恢复最近操作；“本局重来”保留当前餐盘和给定位置，从第一步重新推理。</li></ol>
+            <ol><li><b>开局给定</b>：系统先放好一个带星标的牛角包，它不能拿走，是整盘推理的起点。</li><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击立即打 ×，双击摆放或拿走；按住或直接滑动会连续补齐 ×。</li><li><b>道具与撤回</b>：339 锁定正确格，小顾批量排除；道具一经使用不能撤回，次数也不会退还。</li></ol>
             <button className="primary-button pressable" onClick={() => setShowRules(false)}>继续摆盘</button>
           </section>
         </div>
