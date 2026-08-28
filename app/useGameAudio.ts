@@ -1,6 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 
 export type SfxName = "reveal" | "flag" | "help" | "win" | "lose" | "click";
 
@@ -32,7 +43,9 @@ const SFX_MIX: Record<SfxName, { gain: number; duck: number; duration: number }>
   click: { gain: 0.82, duck: 1, duration: 180 },
 };
 
-export function useGameAudio(gamePaused = false) {
+const SFX_NAMES = Object.keys(SFX_MIX) as SfxName[];
+
+function useGameAudioController(gamePaused = false) {
   const [musicEnabled, setMusicEnabled] = useState(DEFAULT_SETTINGS.musicEnabled);
   const [sfxEnabled, setSfxEnabled] = useState(DEFAULT_SETTINGS.sfxEnabled);
   const [musicLoop, setMusicLoop] = useState(DEFAULT_SETTINGS.musicLoop);
@@ -44,6 +57,9 @@ export function useGameAudio(gamePaused = false) {
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const sfxRef = useRef<Partial<Record<SfxName, HTMLAudioElement>>>({});
   const duckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmIdleRef = useRef<number | null>(null);
+  const sfxWarmScheduledRef = useRef(false);
   const unlockedRef = useRef(false);
   const duckFactorRef = useRef(1);
   const musicEnabledRef = useRef(musicEnabled);
@@ -79,6 +95,8 @@ export function useGameAudio(gamePaused = false) {
       bgm.pause();
       Object.values(sfxRef.current).forEach((sound) => sound?.pause());
       if (duckTimerRef.current) clearTimeout(duckTimerRef.current);
+      if (warmTimerRef.current) clearTimeout(warmTimerRef.current);
+      if (warmIdleRef.current !== null && "cancelIdleCallback" in window) window.cancelIdleCallback(warmIdleRef.current);
     };
   }, []);
 
@@ -116,6 +134,27 @@ export function useGameAudio(gamePaused = false) {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [gamePaused]);
 
+  const warmSfx = useCallback(() => {
+    if (sfxWarmScheduledRef.current) return;
+    sfxWarmScheduledRef.current = true;
+
+    const warm = () => {
+      SFX_NAMES.forEach((name) => {
+        if (sfxRef.current[name]) return;
+        const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
+        sound.preload = "auto";
+        sound.load();
+        sfxRef.current[name] = sound;
+      });
+    };
+
+    if ("requestIdleCallback" in window) {
+      warmIdleRef.current = window.requestIdleCallback(warm, { timeout: 1200 });
+    } else {
+      warmTimerRef.current = setTimeout(warm, 220);
+    }
+  }, []);
+
   const unlockAudio = useCallback(() => {
     if (!unlockedRef.current) {
       unlockedRef.current = true;
@@ -126,7 +165,8 @@ export function useGameAudio(gamePaused = false) {
       if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
       void bgm.play().catch(() => undefined);
     }
-  }, [gamePaused]);
+    warmSfx();
+  }, [gamePaused, warmSfx]);
 
   const playSfx = useCallback((name: SfxName) => {
     if (!sfxEnabledRef.current) return;
@@ -169,4 +209,34 @@ export function useGameAudio(gamePaused = false) {
     sfxVolume,
     unlockAudio,
   };
+}
+
+type GameAudioApi = ReturnType<typeof useGameAudioController>;
+type SharedGameAudio = GameAudioApi & {
+  setSharedPaused: Dispatch<SetStateAction<boolean>>;
+};
+
+const GameAudioContext = createContext<SharedGameAudio | null>(null);
+
+export function GameAudioProvider({ children }: { children: ReactNode }) {
+  const [sharedPaused, setSharedPaused] = useState(false);
+  const audio = useGameAudioController(sharedPaused);
+  return createElement(GameAudioContext.Provider, { value: { ...audio, setSharedPaused } }, children);
+}
+
+export function useGameAudio(gamePaused = false) {
+  const shared = useContext(GameAudioContext);
+  const setSharedPaused = shared?.setSharedPaused;
+
+  useEffect(() => {
+    if (!setSharedPaused) return;
+    setSharedPaused(gamePaused);
+    return () => setSharedPaused(false);
+  }, [gamePaused, setSharedPaused]);
+
+  if (!shared) {
+    throw new Error("useGameAudio must be used inside GameAudioProvider");
+  }
+
+  return shared as GameAudioApi;
 }

@@ -605,7 +605,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   return (
     <main className={`game-shell platter-shell ${!tutorialReady || tutorialStep !== null ? "tutorial-active" : ""}`} onPointerDown={unlockAudio}>
       <header className="topbar platter-topbar">
-        <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" decoding="async" fetchPriority="high" /><span>‹</span></button>
+        <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择"><img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" decoding="async" fetchPriority="high" /><span>‹</span></button>
         <div className="title-block"><p className="eyebrow">CROISSANT LOGIC</p><h1>牛角包摆盘</h1></div>
         <div className="top-actions">
           <button className={`round-button audio-button pressable ${allMuted ? "muted" : ""}`} onClick={() => { setMusicEnabled(allMuted); setSfxEnabled(allMuted); if (!allMuted) playSfx("click"); }} aria-label={allMuted ? "打开声音" : "关闭声音"}>♫</button>
@@ -614,9 +614,9 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       </header>
 
       <section className="platter-mission">
-        <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" decoding="async" />
+        <img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" decoding="async" />
         <div><span>小温的摆盘课</span><b>{message}</b></div>
-        <img src={`${ASSET_ROOT}/croissant.png`} alt="牛角包" decoding="async" />
+        <img src={`${ASSET_ROOT}/croissant.webp`} alt="牛角包" decoding="async" />
       </section>
 
       <section className={`platter-panel ${status}`} aria-label={`牛角包摆盘第 ${levelIndex + 1} 关`}>
@@ -676,7 +676,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
                 onContextMenu={(event) => event.preventDefault()}
               >
                 {mark === 1 && <span className="puzzle-cross">×</span>}
-                {mark === 2 && <img src={`${ASSET_ROOT}/croissant.png`} alt="牛角包" decoding="async" />}
+                {mark === 2 && <img src={`${ASSET_ROOT}/croissant.webp`} alt="牛角包" decoding="async" />}
               </button>
             );
           })}
@@ -688,16 +688,16 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         </div>
 
         <div className={`platter-tools ${tutorialStep === 5 ? "tutorial-target" : ""}`}>
-          <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.png`} alt="" decoding="async" fetchPriority="low" /><span><b>339扫描</b><small>锁定正确格</small></span><i>{toolsLeft.scan}</i></button>
-          <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" decoding="async" fetchPriority="low" /><span><b>小顾整理</b><small>闪亮批量 ×</small></span><i>{toolsLeft.tidy}</i></button>
-          <button className="prop-button pressable" onClick={() => handleTool("intuition")} disabled={toolsLeft.intuition <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" decoding="async" fetchPriority="low" /><span><b>小温直觉</b><small>摆对一个</small></span><i>{toolsLeft.intuition}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.webp`} alt="" decoding="async" fetchPriority="low" /><span><b>339扫描</b><small>锁定正确格</small></span><i>{toolsLeft.scan}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.webp`} alt="" decoding="async" fetchPriority="low" /><span><b>小顾整理</b><small>闪亮批量 ×</small></span><i>{toolsLeft.tidy}</i></button>
+          <button className="prop-button pressable" onClick={() => handleTool("intuition")} disabled={toolsLeft.intuition <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaowen.webp`} alt="" decoding="async" fetchPriority="low" /><span><b>小温直觉</b><small>摆对一个</small></span><i>{toolsLeft.intuition}</i></button>
         </div>
 
-        {showIdleHint && <button className="idle-hint-bubble pressable" onClick={() => { setShowIdleHint(false); handleTool("scan"); }}><img src={`${ASSET_ROOT}/339.png`} alt="" /><span>要不要试试 339 扫描？</span></button>}
+        {showIdleHint && <button className="idle-hint-bubble pressable" onClick={() => { setShowIdleHint(false); handleTool("scan"); }}><img src={`${ASSET_ROOT}/339.webp`} alt="" /><span>要不要试试 339 扫描？</span></button>}
 
         {(status === "won" || status === "failed") && (
           <section className={`platter-result ${status}`} role="status">
-            {status === "won" ? <div className="platter-result-art"><img src={`${ASSET_ROOT}/couple-sticker.png`} alt="小顾和小温贴贴庆祝" decoding="async" loading="lazy" /></div> : <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" decoding="async" />}
+            {status === "won" ? <div className="platter-result-art"><img src={`${ASSET_ROOT}/couple-sticker.webp`} alt="小顾和小温贴贴庆祝" decoding="async" loading="lazy" /></div> : <img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" decoding="async" />}
             <div><small>{status === "won" ? victory.badge : "TRY AGAIN"}</small><h2>{status === "won" ? victory.title : "摆盘需要调整一下"}</h2><p>{status === "won" ? victory.copy : "保留这张餐盘，从系统给定的第一个牛角包重新推理。"}</p></div>
             <div className="result-actions">
               {status === "failed" && undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastAction}>撤回这步</button>}
@@ -710,13 +710,13 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       {(!tutorialReady || tutorialStep !== null) && <div className="tutorial-shield" aria-hidden="true" />}
       {tutorialStep !== null && (
         <section className={`tutorial-coach platter-tutorial ${tutorialStep === 0 || tutorialStep === 6 ? "centered" : ""} ${tutorialStep === 5 ? "upper" : ""}`} role="dialog" aria-modal="true" aria-live="polite">
-          <div className="tutorial-head"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" /><span>小温的摆盘课</span><b>{tutorialStep === 0 ? "玩法" : tutorialStep === 6 ? "完成" : `${tutorialStep}/5`}</b></div>
+          <div className="tutorial-head"><img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" /><span>小温的摆盘课</span><b>{tutorialStep === 0 ? "玩法" : tutorialStep === 6 ? "完成" : `${tutorialStep}/5`}</b></div>
           {tutorialStep === 0 && <><h2>目标：找出所有牛角包的位置</h2><p>一盘有多块颜色区域。你要在每种颜色里放 1 个，同时每行、每列也只能有 1 个，两个牛角包连斜角都不能挨着。</p><div className="tutorial-rule-summary"><b>每色 1 个</b><b>每行列 1 个</b><b>横竖斜不相邻</b></div><p>系统会先放好 1 个，再由你推理剩下的位置。</p><button className="tutorial-button pressable" onClick={startTutorial}>用 4×4 练习盘学会</button></>}
           {tutorialStep === 1 && <><h2>① 系统先放好了一个</h2><p>看高亮牛角包：它所在的<b>颜色区域、整行、整列，以及周围 8 格</b>都不能再放。上方三条规则会一直显示。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(2)}>明白，从它开始排除</button></>}
           {tutorialStep === 2 && <><h2>② 单击标记“不能放”</h2><p>高亮格紧挨着已有牛角包，斜角相邻也不允许，所以这里肯定不能放。单击它打 ×。</p><span className="tutorial-wait">等待你单击棋盘中央的高亮格…</span></>}
           {tutorialStep === 3 && <><h2>③ 滑动可以连续排除</h2><p>这 3 格与已有牛角包在同一列。按住第一格并向下划过，系统会自动补齐中间经过的格子。</p><span className="tutorial-wait">等待你按住并滑过 3 格…</span></>}
           {tutorialStep === 4 && <><h2>④ 双击摆放下一个</h2><p>排除后，高亮位置满足颜色、行列和不相邻三条规则。请快速双击摆下牛角包。</p><span className="tutorial-wait">等待你双击高亮格…</span></>}
-          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>只恢复最近一次普通操作，道具次数不会退还</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>直接锁定并高亮一个可以正确摆放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除并闪亮标出本次新增的所有 ×</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>道具一经使用不能撤回；想从头推理时，可点“本局重来”。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
+          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>只恢复最近一次普通操作，道具次数不会退还</small></span><span><img src={`${ASSET_ROOT}/339.webp`} alt="" /><b>339 扫描</b><small>直接锁定并高亮一个可以正确摆放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaogu.webp`} alt="" /><b>小顾整理</b><small>批量排除并闪亮标出本次新增的所有 ×</small></span><span><img src={`${ASSET_ROOT}/xiaowen.webp`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>道具一经使用不能撤回；想从头推理时，可点“本局重来”。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
           {tutorialStep === 6 && <><h2>现在开始第 1 关吧！</h2><p>系统已经替你放好第一个牛角包。先给它同颜色、同行列和相邻的位置打 ×，再继续推理。</p><button className="tutorial-button pressable" onClick={finishTutorial}>进入正式关卡</button></>}
         </section>
       )}
@@ -725,7 +725,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         <div className="modal-backdrop">
           <section className="level-picker" role="dialog" aria-modal="true" aria-labelledby="level-picker-title">
             <button className="modal-close pressable" onClick={() => setShowLevelPicker(false)} aria-label="关闭关卡选择">×</button>
-            <img src={`${ASSET_ROOT}/croissant.png`} alt="" />
+            <img src={`${ASSET_ROOT}/croissant.webp`} alt="" />
             <span className="mission-tag">12 份摆盘订单</span>
             <h2 id="level-picker-title">选择关卡</h2>
             <p>通过当前最高关卡，才会解锁下一张餐盘。</p>
@@ -743,7 +743,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         <div className="modal-backdrop">
           <section className="help-modal platter-rules" role="dialog" aria-modal="true">
             <button className="modal-close pressable" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
-            <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
+            <img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" />
             <span className="mission-tag">摆盘规则</span><h2>三个条件要同时满足</h2>
             <ol><li><b>开局给定</b>：系统先放好一个带星标的牛角包，它不能拿走，是整盘推理的起点。</li><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击立即打 ×，双击摆放或拿走；按住或直接滑动会连续补齐 ×。</li><li><b>道具与撤回</b>：339 锁定正确格，小顾批量排除；道具一经使用不能撤回，次数也不会退还。</li></ol>
             <button className="primary-button pressable" onClick={() => setShowRules(false)}>继续摆盘</button>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { CroissantPuzzle } from "./CroissantPuzzle";
-import { useGameAudio } from "./useGameAudio";
+import { GameAudioProvider, useGameAudio } from "./useGameAudio";
 
 type Breakfast = "croissant" | "bread" | null;
 type GameStatus = "idle" | "playing" | "won" | "lost";
@@ -34,6 +34,13 @@ const DIFFICULTIES = {
 } as const;
 
 const ASSET_ROOT = "assets";
+const DEFERRED_ASSETS = [
+  "xiaogu.webp",
+  "xiaowen.webp",
+  "bread.webp",
+  "pause-couple.webp",
+  "couple-sticker.webp",
+];
 const TUTORIAL_REVEAL_TARGET = 40;
 const TUTORIAL_MINE_TARGET = 41;
 const TUTORIAL_STORAGE_KEY = "bakery-tutorial-v2-complete";
@@ -41,29 +48,52 @@ const TUTORIAL_STORAGE_KEY = "bakery-tutorial-v2-complete";
 type BakeryMode = "menu" | "minesweeper" | "platter";
 
 export default function Home() {
+  return <GameAudioProvider><BakeryApp /></GameAudioProvider>;
+}
+
+function BakeryApp() {
   const [mode, setMode] = useState<BakeryMode>("menu");
+  const { unlockAudio } = useGameAudio(false);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+    const preload = () => {
+      DEFERRED_ASSETS.forEach((filename) => {
+        const image = new Image();
+        image.decoding = "async";
+        image.src = `${ASSET_ROOT}/${filename}`;
+      });
+    };
+    if ("requestIdleCallback" in window) idleId = window.requestIdleCallback(preload, { timeout: 1800 });
+    else timer = setTimeout(preload, 500);
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (idleId !== null && "cancelIdleCallback" in window) window.cancelIdleCallback(idleId);
+    };
+  }, []);
 
   if (mode === "minesweeper") return <MinesweeperMode onBack={() => setMode("menu")} />;
   if (mode === "platter") return <CroissantPuzzle onBack={() => setMode("menu")} />;
 
   return (
-    <main className="mode-menu-shell">
+    <main className="mode-menu-shell" onPointerDown={unlockAudio}>
       <header className="mode-menu-brand">
-        <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" decoding="async" fetchPriority="high" />
+        <img src={`${ASSET_ROOT}/339.webp`} alt="339 机器人" decoding="async" fetchPriority="high" />
         <div><span>339&apos;S BAKERY</span><h1>今天玩哪一种？</h1></div>
       </header>
       <figure className="mode-menu-hero">
-        <img src={`${ASSET_ROOT}/success-bakery.jpg`} alt="小顾、小温和339在烘焙屋准备牛角包" decoding="async" fetchPriority="high" />
+        <img src={`${ASSET_ROOT}/success-bakery.webp`} alt="小顾、小温和339在烘焙屋准备牛角包" decoding="async" fetchPriority="high" />
         <figcaption><b>小顾 × 小温的烘焙约会</b><span>选一个任务，339 已经准备好啦</span></figcaption>
       </figure>
       <section className="mode-choice-list" aria-label="选择游戏模式">
         <button className="mode-choice minesweeper-choice pressable" onClick={() => setMode("minesweeper")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/339.png`} alt="" decoding="async" /><i>?</i></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/339.webp`} alt="" decoding="async" /><i>?</i></span>
           <span className="mode-choice-copy"><small>经典寻宝</small><b>顾温甜蜜扫雷</b><em>看数字、避开烤焦面包，找齐早餐</em></span>
           <strong>开始 ›</strong>
         </button>
         <button className="mode-choice platter-choice pressable" onClick={() => setMode("platter")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.png`} alt="" decoding="async" /><i>12</i></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.webp`} alt="" decoding="async" /><i>12</i></span>
           <span className="mode-choice-copy"><small>全新推理</small><b>牛角包摆盘</b><em>颜色、行列与距离，12 关逐步变难</em></span>
           <strong>挑战 ›</strong>
         </button>
@@ -455,12 +485,12 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
 
   return (
     <main className={`game-shell ${!tutorialChecked || tutorialStep !== null ? "tutorial-active" : ""}`} onPointerDown={unlockAudio}>
-      <img className="floating-food floating-croissant" src={`${ASSET_ROOT}/croissant.png`} alt="" aria-hidden="true" />
-      <img className="floating-food floating-bread" src={`${ASSET_ROOT}/bread.png`} alt="" aria-hidden="true" />
+      <img className="floating-food floating-croissant" src={`${ASSET_ROOT}/croissant.webp`} alt="" aria-hidden="true" />
+      <img className="floating-food floating-bread" src={`${ASSET_ROOT}/bread.webp`} alt="" aria-hidden="true" />
 
       <header className="topbar">
         <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择">
-          <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" /><span>‹</span>
+          <img src={`${ASSET_ROOT}/339.webp`} alt="339 机器人" /><span>‹</span>
         </button>
         <div className="title-block">
           <p className="eyebrow">339&apos;s bakery protocol</p>
@@ -478,7 +508,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
 
       <section className="mission-card" aria-label="剧情任务">
         <div className="character xiaogu-card">
-          <img src={`${ASSET_ROOT}/xiaogu.png`} alt="小顾" />
+          <img src={`${ASSET_ROOT}/xiaogu.webp`} alt="小顾" />
           <span>小顾</span>
         </div>
         <div className="mission-copy">
@@ -487,7 +517,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
           <p>{characterLine}</p>
         </div>
         <div className="character xiaowen-card">
-          <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
+          <img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" />
           <span>小温</span>
         </div>
       </section>
@@ -518,11 +548,11 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
 
         <div className="status-row">
           <div className="status-pill breakfast-counter">
-            <span className="mini-foods"><img src={`${ASSET_ROOT}/croissant.png`} alt="" /><img src={`${ASSET_ROOT}/bread.png`} alt="" /></span>
+            <span className="mini-foods"><img src={`${ASSET_ROOT}/croissant.webp`} alt="" /><img src={`${ASSET_ROOT}/bread.webp`} alt="" /></span>
             <span>早餐</span><strong>{breakfastFound}/{breakfastGoal}</strong>
           </div>
           <button className="face-button pressable" onClick={() => restart()} aria-label="重新开始">
-            <img src={`${ASSET_ROOT}/339.png`} alt="" />
+            <img src={`${ASSET_ROOT}/339.webp`} alt="" />
           </button>
           <div className="status-pill timer-pill">
             <span>BEST {best === null ? "---" : String(best).padStart(3, "0")}</span>
@@ -539,11 +569,11 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
           {cells.map((cell, index) => {
             const content = cell.revealed
               ? cell.mine
-                ? <img className="burnt-bread" src={`${ASSET_ROOT}/bread.png`} alt="烤焦面包" />
+                ? <img className="burnt-bread" src={`${ASSET_ROOT}/bread.webp`} alt="烤焦面包" />
                 : cell.breakfast
-                  ? <span className="treasure-cell"><img className="found-food" src={`${ASSET_ROOT}/${cell.breakfast === "croissant" ? "croissant" : "bread"}.png`} alt={cell.breakfast === "croissant" ? "牛角包" : "面包"} />{cell.nearby > 0 && <b className="treasure-number">{cell.nearby}</b>}</span>
+                  ? <span className="treasure-cell"><img className="found-food" src={`${ASSET_ROOT}/${cell.breakfast === "croissant" ? "croissant" : "bread"}.webp`} alt={cell.breakfast === "croissant" ? "牛角包" : "面包"} />{cell.nearby > 0 && <b className="treasure-number">{cell.nearby}</b>}</span>
                   : cell.nearby || ""
-              : cell.flagged ? <img className="flag-sticker" src={`${ASSET_ROOT}/xiaogu.png`} alt="小顾标记" /> : "";
+              : cell.flagged ? <img className="flag-sticker" src={`${ASSET_ROOT}/xiaogu.webp`} alt="小顾标记" /> : "";
             return (
               <button
                 key={index}
@@ -564,7 +594,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
             <span className="tool-icon undo-icon">↶</span><span><b>撤销一步</b><small>{undoSnapshot ? "仅恢复最近操作" : "暂无可撤销操作"}</small></span>
           </button>
           <button className={`tool-button scan-button pressable ${tutorialStep === 5 ? "tutorial-target" : ""}`} onClick={useScan} disabled={scanUsed || (tutorialStep !== null && tutorialStep !== 5)}>
-            <img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>{scanUsed ? "扫描已用" : "339 扫描"}</b><small>{scanUsed ? "下局充能" : "安全翻 1 格"}</small></span>
+            <img src={`${ASSET_ROOT}/339.webp`} alt="" /><span><b>{scanUsed ? "扫描已用" : "339 扫描"}</b><small>{scanUsed ? "下局充能" : "安全翻 1 格"}</small></span>
           </button>
         </div>
 
@@ -572,14 +602,14 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
           <div className={`result-card ${status}`} role="status">
             {status === "won" ? (
               <figure className="success-scene">
-                <img src={`${ASSET_ROOT}/success-bakery.jpg`} alt="小顾和小温成功找到牛角包，一起享用早餐" />
+                <img src={`${ASSET_ROOT}/success-bakery.webp`} alt="小顾和小温成功找到牛角包，一起享用早餐" />
                 <figcaption><span>MISSION COMPLETE</span><b>牛角包约会达成 ♡</b></figcaption>
               </figure>
             ) : (
               <div className="result-portraits">
-                <img src={`${ASSET_ROOT}/xiaogu.png`} alt="小顾" />
+                <img src={`${ASSET_ROOT}/xiaogu.webp`} alt="小顾" />
                 <span>…</span>
-                <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
+                <img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" />
               </div>
             )}
             <div><strong>{status === "won" ? "早餐约会达成！" : "这炉烤过头啦"}</strong><p>{status === "won" ? `用时 ${seconds} 秒，完成扫雷并收集了全部 ${breakfastGoal} 份早餐。` : "别担心，第一格永远安全，再试一次吧。"}</p></div>
@@ -598,7 +628,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
       {tutorialStep !== null && (
           <section className={`tutorial-coach ${tutorialStep === 0 || tutorialStep === 6 ? "centered" : ""} ${tutorialStep === 4 || tutorialStep === 5 ? "upper" : ""}`} role="dialog" aria-modal="true" aria-live="polite">
             <div className="tutorial-head">
-              <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" />
+              <img src={`${ASSET_ROOT}/339.webp`} alt="339 机器人" />
               <span>339 新手训练</span>
               <b>{tutorialStep === 6 ? "5/5" : `${Math.max(0, tutorialStep)}/5`}</b>
             </div>
@@ -619,7 +649,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
       {isPaused && (
         <div className="pause-backdrop">
           <section className="pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-            <img src={`${ASSET_ROOT}/pause-couple.jpg`} alt="小顾抱着小温" />
+            <img src={`${ASSET_ROOT}/pause-couple.webp`} alt="小顾抱着小温" />
             <div className="pause-copy">
               <span>BAKERY BREAK</span>
               <h2 id="pause-title">先靠一会儿吧</h2>
@@ -634,7 +664,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
         <div className="modal-backdrop" onMouseDown={closeHelp}>
           <section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onMouseDown={(event) => event.stopPropagation()}>
             <button className="modal-close pressable" onClick={closeHelp} aria-label="关闭说明">×</button>
-            <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" />
+            <img src={`${ASSET_ROOT}/339.webp`} alt="339 机器人" />
             <span className="mission-tag">第一次来？</span>
             <h2 id="help-title">30 秒学会心动扫雷</h2>
             <p className="guide-intro">目标很简单：帮小顾安全地找齐小温喜欢的早餐。</p>
@@ -655,7 +685,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
         <div className="modal-backdrop" onMouseDown={() => { playSfx("click"); setShowAudioSettings(false); }}>
           <section className="audio-modal" role="dialog" aria-modal="true" aria-labelledby="audio-title" onMouseDown={(event) => event.stopPropagation()}>
             <button className="modal-close pressable" onClick={() => { playSfx("click"); setShowAudioSettings(false); }} aria-label="关闭声音设置">×</button>
-            <div className="audio-robot"><img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" /><span>♫</span></div>
+            <div className="audio-robot"><img src={`${ASSET_ROOT}/339.webp`} alt="339 机器人" /><span>♫</span></div>
             <span className="mission-tag">339 音频控制台</span>
             <h2 id="audio-title">让烘焙屋听起来刚刚好</h2>
             <p className="audio-status">{audioUnlocked ? "声音已启用，设置会保存在这台设备上。" : "轻点页面后，浏览器才会允许播放声音。"}</p>
