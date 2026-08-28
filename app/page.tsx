@@ -310,14 +310,6 @@ export default function Home() {
       ? "小顾：没关系，我们再烤一炉。"
       : message;
 
-  const postcardLine = status === "won"
-    ? "牛角包约会达成 ♡"
-    : status === "lost"
-      ? "休息一下，再烤一炉"
-      : status === "playing"
-        ? `早餐进度 ${breakfastFound}/${breakfastGoal}`
-        : "今天也一起寻找早餐";
-
   return (
     <main className="game-shell" onPointerDown={unlockAudio}>
       <img className="floating-food floating-croissant" src={`${ASSET_ROOT}/croissant.png`} alt="" aria-hidden="true" />
@@ -434,12 +426,6 @@ export default function Home() {
             <img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>{scanUsed ? "扫描已用" : "339 扫描"}</b><small>{scanUsed ? "下局充能" : "安全翻 1 格"}</small></span>
           </button>
         </div>
-
-        <section className="story-postcard" aria-label="小顾和小温的烘焙约会">
-          <img className="postcard-ambient" src={`${ASSET_ROOT}/date-postcard.jpg`} alt="" aria-hidden="true" />
-          <img className="postcard-feature" src={`${ASSET_ROOT}/bakery-family.jpg`} alt="小顾、小温和 339 一起准备牛角包" />
-          <div><span>BAKERY DATE</span><b>小顾 × 小温</b><small>{postcardLine}</small></div>
-        </section>
 
         {(status === "won" || status === "lost") && (
           <div className={`result-card ${status}`} role="status">

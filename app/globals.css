@@ -104,14 +104,6 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); letter-spacing: -.07em; line-
 .flag-mode-avatar { width: 30px; height: 30px; object-fit: contain; }
 .tool-button.active .tool-icon { background: rgba(255,255,255,.2); color: #fff; }
 .scan-button img { width: 32px; height: 32px; object-fit: contain; }
-.story-postcard { position: relative; flex: 1 1 64px; min-height: 48px; margin-top: 9px; overflow: hidden; border: 1px solid #e5c7bf; border-radius: 14px; background: #fffaf3; box-shadow: inset 0 0 0 2px rgba(255,255,255,.7), 0 2px 0 #d8b2ac; isolation: isolate; }
-.postcard-ambient { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 78% 29%; opacity: .42; filter: saturate(.72) contrast(.9); }
-.postcard-feature { position: absolute; z-index: -1; top: -8%; right: -2%; width: 76%; height: 116%; object-fit: cover; object-position: 51% 34%; opacity: .94; filter: saturate(.9) contrast(.96); -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.22) 17%, #000 42%); mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.22) 17%, #000 42%); }
-.story-postcard::after { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, rgba(255,253,249,.98) 0 34%, rgba(255,253,249,.76) 47%, rgba(255,253,249,.08) 70%, transparent 82%); }
-.story-postcard div { height: 100%; width: 55%; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 7px 10px; }
-.story-postcard span { color: #b06173; font: 900 7px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; }
-.story-postcard b { margin-top: 3px; font-size: 11px; }
-.story-postcard small { margin-top: 2px; color: #9c7079; font-size: 7px; font-weight: 800; }
 .result-card { position: absolute; z-index: 7; inset: 108px 24px auto; display: grid; justify-items: center; gap: 8px; padding: 17px; border: 2px solid #e7c4cc; border-radius: 21px; background: rgba(255,251,246,.96); box-shadow: 0 14px 40px rgba(91,46,61,.25), 0 7px 0 rgba(150,80,100,.18); text-align: center; animation: result .4s cubic-bezier(.2,1.3,.4,1); backdrop-filter: blur(7px); overflow: hidden; }
 .result-card.won { inset: 72px 16px auto; padding: 8px 8px 14px; }
 .result-card.lost { border-color: #d8959d; }
@@ -221,7 +213,6 @@ footer { display: flex; justify-content: space-between; margin-top: 21px; paddin
   .tool-icon { width: 25px; height: 25px; }
   .flag-mode-avatar { width: 27px; height: 27px; }
   .scan-button img { width: 28px; height: 28px; }
-  .story-postcard { margin-top: 7px; }
   footer { display: none; }
   .modal-backdrop { padding: 10px; }
   .help-modal { max-height: calc(100dvh - 20px); padding: 18px 16px 16px; border-radius: 22px; }
@@ -247,7 +238,6 @@ footer { display: flex; justify-content: space-between; margin-top: 21px; paddin
   .game-shell { border-inline: 1px solid rgba(126,75,89,.12); box-shadow: 0 0 70px rgba(94,50,63,.18); }
 }
 @media (max-height: 620px) {
-  .story-postcard { display: none; }
   .game-panel { padding-bottom: 5px; }
 }
 @media (max-width: 390px) {
