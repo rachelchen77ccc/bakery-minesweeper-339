@@ -193,7 +193,9 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   const tutorialAutoCell = puzzle.autoCell;
   const tutorialAutoRow = Math.floor(tutorialAutoCell / config.size);
   const tutorialAutoCol = tutorialAutoCell % config.size;
-  const tutorialCrossTarget = tutorialAutoRow * config.size + (tutorialAutoCol === 0 ? 1 : 0);
+  const tutorialCrossRow = tutorialAutoRow < config.size - 1 ? tutorialAutoRow + 1 : tutorialAutoRow - 1;
+  const tutorialCrossCol = tutorialAutoCol < config.size - 1 ? tutorialAutoCol + 1 : tutorialAutoCol - 1;
+  const tutorialCrossTarget = tutorialCrossRow * config.size + tutorialCrossCol;
   const tutorialNextSolutionCell = config.size + puzzle.solution[1];
   const tutorialDragTargets = useMemo(() => {
     return [1, 2, 3].map((row) => row * config.size + tutorialAutoCol);
@@ -567,7 +569,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
         </div>
 
         <div
-          className="puzzle-board"
+          className={`puzzle-board ${tutorialStep === 2 || tutorialStep === 3 || tutorialStep === 4 ? "tutorial-board-focus" : ""}`}
           role="grid"
           aria-label={`${config.size} 行 ${config.size} 列牛角包摆盘棋盘`}
           style={{ "--puzzle-size": config.size } as CSSProperties}
@@ -642,7 +644,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
           <div className="tutorial-head"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" /><span>小温的摆盘课</span><b>{tutorialStep === 0 ? "玩法" : tutorialStep === 6 ? "完成" : `${tutorialStep}/5`}</b></div>
           {tutorialStep === 0 && <><h2>目标：找出所有牛角包的位置</h2><p>一盘有多块颜色区域。你要在每种颜色里放 1 个，同时每行、每列也只能有 1 个，两个牛角包连斜角都不能挨着。</p><div className="tutorial-rule-summary"><b>每色 1 个</b><b>每行列 1 个</b><b>横竖斜不相邻</b></div><p>系统会先放好 1 个，再由你推理剩下的位置。</p><button className="tutorial-button pressable" onClick={startTutorial}>用 4×4 练习盘学会</button></>}
           {tutorialStep === 1 && <><h2>① 系统先放好了一个</h2><p>看高亮牛角包：它所在的<b>颜色区域、整行、整列，以及周围 8 格</b>都不能再放。上方三条规则会一直显示。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(2)}>明白，从它开始排除</button></>}
-          {tutorialStep === 2 && <><h2>② 单击标记“不能放”</h2><p>高亮格与已有牛角包在同一行，所以肯定不能放。单击它打 ×。</p><span className="tutorial-wait">等待你单击高亮格…</span></>}
+          {tutorialStep === 2 && <><h2>② 单击标记“不能放”</h2><p>高亮格紧挨着已有牛角包，斜角相邻也不允许，所以这里肯定不能放。单击它打 ×。</p><span className="tutorial-wait">等待你单击棋盘中央的高亮格…</span></>}
           {tutorialStep === 3 && <><h2>③ 滑动可以连续排除</h2><p>这 3 格与已有牛角包在同一列。按住第一格并向下划过，系统会自动补齐中间经过的格子。</p><span className="tutorial-wait">等待你按住并滑过 3 格…</span></>}
           {tutorialStep === 4 && <><h2>④ 双击摆放下一个</h2><p>排除后，高亮位置满足颜色、行列和不相邻三条规则。请快速双击摆下牛角包。</p><span className="tutorial-wait">等待你双击高亮格…</span></>}
           {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>棋盘、失误次数和道具都会一起恢复</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>高亮一行、列或区域，提示推理方向</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除已经确定不能放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>如果摆放冲突，对应规则会变红并写清原因。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
