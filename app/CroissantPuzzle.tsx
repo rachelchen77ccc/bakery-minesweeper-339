@@ -5,8 +5,17 @@ import { useGameAudio } from "./useGameAudio";
 
 type PuzzleStatus = "ready" | "playing" | "won" | "failed";
 type PuzzleMark = 0 | 1 | 2;
-type PuzzleTutorialStep = 0 | 1 | 2 | 3 | 4 | 5 | null;
+type PuzzleTutorialStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | null;
 type ToolCounts = { scan: number; tidy: number; intuition: number };
+type ConflictType = "region" | "line" | "adjacent";
+
+type PuzzleSnapshot = {
+  marks: PuzzleMark[];
+  mistakes: number;
+  status: PuzzleStatus;
+  tools: ToolCounts;
+  message: string;
+};
 
 type LevelConfig = {
   size: number;
@@ -15,7 +24,7 @@ type LevelConfig = {
 };
 
 const ASSET_ROOT = "assets";
-const PUZZLE_TUTORIAL_KEY = "croissant-platter-tutorial-v1-complete";
+const PUZZLE_TUTORIAL_KEY = "croissant-platter-tutorial-v2-complete";
 const PUZZLE_PROGRESS_KEY = "croissant-platter-unlocked";
 const REGION_COLORS = ["#f9dfcf", "#f8eab8", "#dcebcf", "#d9e9ec", "#e2ddf1", "#f2d9e4", "#e6d6c5", "#d8eadf"];
 
@@ -87,7 +96,16 @@ function buildPuzzle(levelIndex: number, variant: number) {
     return winner;
   });
   queenCells.forEach((index, region) => { regions[index] = region; });
-  return { solution, solutionCells: new Set(queenCells), regions };
+  const autoRow = (levelIndex + variant) % config.size;
+  return { solution, solutionCells: new Set(queenCells), regions, autoCell: queenCells[autoRow] };
+}
+
+function startingMarks(levelIndex: number, variant: number) {
+  const config = LEVELS[levelIndex];
+  const puzzle = buildPuzzle(levelIndex, variant);
+  const marks = Array(config.size * config.size).fill(0) as PuzzleMark[];
+  marks[puzzle.autoCell] = 2;
+  return marks;
 }
 
 function conflictsFor(marks: PuzzleMark[], size: number, regions: number[]) {
@@ -106,6 +124,30 @@ function conflictsFor(marks: PuzzleMark[], size: number, regions: number[]) {
   return conflicts;
 }
 
+function conflictTypesFor(marks: PuzzleMark[], size: number, regions: number[]) {
+  const types = new Set<ConflictType>();
+  const placed = marks.map((mark, index) => ({ mark, index })).filter(({ mark }) => mark === 2).map(({ index }) => index);
+  for (let first = 0; first < placed.length; first += 1) {
+    for (let second = first + 1; second < placed.length; second += 1) {
+      const a = placed[first]; const b = placed[second];
+      const ar = Math.floor(a / size); const ac = a % size;
+      const br = Math.floor(b / size); const bc = b % size;
+      if (regions[a] === regions[b]) types.add("region");
+      if (ar === br || ac === bc) types.add("line");
+      if (Math.abs(ar - br) <= 1 && Math.abs(ac - bc) <= 1) types.add("adjacent");
+    }
+  }
+  return types;
+}
+
+function conflictMessage(types: Set<ConflictType>) {
+  const reasons: string[] = [];
+  if (types.has("region")) reasons.push("同一颜色区域重复");
+  if (types.has("line")) reasons.push("同一行或同一列重复");
+  if (types.has("adjacent")) reasons.push("两个牛角包相邻");
+  return `${reasons.join("、")}。双击红框牛角包拿走，或点“撤回一步”。`;
+}
+
 function solved(marks: PuzzleMark[], size: number, regions: number[]) {
   return marks.filter((mark) => mark === 2).length === size && conflictsFor(marks, size, regions).size === 0;
 }
@@ -119,7 +161,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   const [variant, setVariant] = useState(0);
   const config = LEVELS[levelIndex];
   const puzzle = useMemo(() => buildPuzzle(levelIndex, variant), [levelIndex, variant]);
-  const [marks, setMarks] = useState<PuzzleMark[]>(() => Array(16).fill(0));
+  const [marks, setMarks] = useState<PuzzleMark[]>(() => startingMarks(0, 0));
   const marksRef = useRef<PuzzleMark[]>(marks);
   const [conflicts, setConflicts] = useState<Set<number>>(new Set());
   const [mistakes, setMistakes] = useState(0);
@@ -129,45 +171,69 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   const [unlockedLevel, setUnlockedLevel] = useState(1);
   const [showLevelPicker, setShowLevelPicker] = useState(false);
   const [showRules, setShowRules] = useState(false);
-  const [message, setMessage] = useState("每种颜色、每行、每列都要恰好摆 1 个牛角包。");
+  const [message, setMessage] = useState("系统已放好第一个牛角包。请从它所在的颜色、行列和相邻格开始排除。");
   const [scanFocus, setScanFocus] = useState<{ type: "row" | "col" | "region"; value: number } | null>(null);
   const [tutorialStep, setTutorialStep] = useState<PuzzleTutorialStep>(null);
   const [tutorialReady, setTutorialReady] = useState(false);
   const [showIdleHint, setShowIdleHint] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
+  const [undoSnapshot, setUndoSnapshot] = useState<PuzzleSnapshot | null>(null);
   const hintedRef = useRef(false);
-  const pendingTap = useRef<{ index: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const pendingTap = useRef<{ index: number; timer: ReturnType<typeof setTimeout>; before: PuzzleSnapshot } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragging = useRef(false);
   const suppressClick = useRef(false);
+  const dragStart = useRef<{ x: number; y: number; index: number } | null>(null);
+  const dragLastIndex = useRef<number | null>(null);
+  const dragSnapshot = useRef<PuzzleSnapshot | null>(null);
   const {
     musicEnabled, playSfx, setMusicEnabled, setSfxEnabled, sfxEnabled, unlockAudio,
   } = useGameAudio(false);
 
-  const tutorialSolutionCell = puzzle.solution[0];
-  const tutorialCrossTarget = tutorialSolutionCell === 0 ? 1 : 0;
+  const tutorialAutoCell = puzzle.autoCell;
+  const tutorialAutoRow = Math.floor(tutorialAutoCell / config.size);
+  const tutorialAutoCol = tutorialAutoCell % config.size;
+  const tutorialCrossTarget = tutorialAutoRow * config.size + (tutorialAutoCol === 0 ? 1 : 0);
+  const tutorialNextSolutionCell = config.size + puzzle.solution[1];
   const tutorialDragTargets = useMemo(() => {
-    const row = 1;
-    return [row * config.size, row * config.size + 1, row * config.size + 2];
-  }, [config.size]);
+    return [1, 2, 3].map((row) => row * config.size + tutorialAutoCol);
+  }, [config.size, tutorialAutoCol]);
+
+  const makeSnapshot = (): PuzzleSnapshot => ({
+    marks: [...marksRef.current], mistakes: mistakesRef.current, status, tools: { ...toolsLeft }, message,
+  });
+
+  const restoreSnapshot = (snapshot: PuzzleSnapshot, clearHistory = true) => {
+    marksRef.current = [...snapshot.marks];
+    mistakesRef.current = snapshot.mistakes;
+    setMarks([...snapshot.marks]);
+    setConflicts(conflictsFor(snapshot.marks, config.size, puzzle.regions));
+    setMistakes(snapshot.mistakes);
+    setStatus(snapshot.status);
+    setToolsLeft({ ...snapshot.tools });
+    setScanFocus(null);
+    setMessage(clearHistory ? "已撤回最近一次操作。棋盘和失误次数都恢复了。" : snapshot.message);
+    if (clearHistory) setUndoSnapshot(null);
+  };
 
   const resetBoard = useCallback((nextLevel = levelIndex, nextVariant = variant) => {
     const nextConfig = LEVELS[nextLevel];
-    const empty = Array(nextConfig.size * nextConfig.size).fill(0) as PuzzleMark[];
-    marksRef.current = empty;
+    const initial = startingMarks(nextLevel, nextVariant);
+    marksRef.current = initial;
     mistakesRef.current = 0;
     setLevelIndex(nextLevel);
     setVariant(nextVariant);
-    setMarks(empty);
+    setMarks(initial);
     setConflicts(new Set());
     setMistakes(0);
     setToolsLeft(toolCounts(nextConfig));
     setStatus("ready");
+    setUndoSnapshot(null);
     setScanFocus(null);
     setShowIdleHint(false);
     hintedRef.current = false;
     setActivityTick((value) => value + 1);
-    setMessage("每种颜色、每行、每列都要恰好摆 1 个牛角包。");
+    setMessage("系统已放好第一个牛角包。请从它所在的颜色、行列和相邻格开始排除。");
   }, [levelIndex, variant]);
 
   useEffect(() => {
@@ -218,9 +284,10 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     window.localStorage.setItem(PUZZLE_PROGRESS_KEY, String(nextUnlocked));
   }, [levelIndex, playSfx, unlockedLevel]);
 
-  const applyMark = useCallback((index: number, nextMark: PuzzleMark, countConflict = true) => {
+  const applyMark = (index: number, nextMark: PuzzleMark, countConflict = true, saveHistory = true, history?: PuzzleSnapshot) => {
     const current = marksRef.current;
     if (current[index] === nextMark || status === "won" || status === "failed") return;
+    if (saveHistory) setUndoSnapshot(history || makeSnapshot());
     const next = [...current];
     next[index] = nextMark;
     const nextConflicts = conflictsFor(next, config.size, puzzle.regions);
@@ -234,7 +301,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       const nextMistakes = mistakesRef.current + 1;
       mistakesRef.current = nextMistakes;
       setMistakes(nextMistakes);
-      setMessage("这两个位置撞规则啦，红框会提示冲突，重新调整就好。");
+      setMessage(conflictMessage(conflictTypesFor(next, config.size, puzzle.regions)));
       playSfx("lose");
       vibrate([35, 25, 55]);
       if (nextMistakes > config.mistakeLimit) {
@@ -248,54 +315,65 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       finishLevel();
       return;
     }
+    if (tutorialStep === null) {
+      if (nextConflicts.size === 0 && conflicts.size > 0) setMessage("冲突已经解除，三条规则重新满足啦。");
+      else if (nextMark === 1) setMessage("已标记 ×：这里暂时排除，不会放牛角包。");
+      else if (nextMark === 2) setMessage("摆下一个牛角包。继续检查它的颜色、行列和周围 8 格。");
+      else setMessage("已拿走这格的标记，可以重新判断。");
+    }
     playSfx(nextMark === 2 ? "flag" : "click");
-  }, [config.mistakeLimit, config.size, finishLevel, playSfx, puzzle.regions, status, tutorialStep]);
+  };
 
-  const tutorialAllows = useCallback((index: number, kind: "cross" | "place") => {
+  const tutorialAllows = (index: number, kind: "cross" | "place") => {
     if (tutorialStep === null) return true;
-    if (tutorialStep === 1) return kind === "cross" && index === tutorialCrossTarget;
-    if (tutorialStep === 2) return kind === "place" && index === tutorialSolutionCell;
+    if (tutorialStep === 2) return kind === "cross" && index === tutorialCrossTarget;
     if (tutorialStep === 3) return kind === "cross" && tutorialDragTargets.includes(index);
+    if (tutorialStep === 4) return kind === "place" && index === tutorialNextSolutionCell;
     return false;
-  }, [tutorialDragTargets, tutorialSolutionCell, tutorialStep, tutorialCrossTarget]);
+  };
 
-  const markCross = useCallback((index: number) => {
+  const markCross = (index: number, history?: PuzzleSnapshot) => {
     if (!tutorialAllows(index, "cross")) return;
     if (tutorialStep === 3) return;
     const current = marksRef.current[index];
     if (current === 2) return;
-    applyMark(index, current === 1 ? 0 : 1, tutorialStep === null);
-    if (tutorialStep === 1) setTutorialStep(2);
-    if (tutorialStep === 3) {
-      const next = marksRef.current;
-      if (tutorialDragTargets.every((target) => next[target] === 1)) setTutorialStep(4);
-    }
-  }, [applyMark, tutorialAllows, tutorialDragTargets, tutorialStep]);
+    applyMark(index, current === 1 ? 0 : 1, tutorialStep === null, true, history);
+    if (tutorialStep === 2) setTutorialStep(3);
+  };
 
-  const toggleCroissant = useCallback((index: number) => {
+  const toggleCroissant = (index: number, history?: PuzzleSnapshot, saveHistory = true) => {
     if (!tutorialAllows(index, "place")) return;
-    applyMark(index, marksRef.current[index] === 2 ? 0 : 2, tutorialStep === null);
-    if (tutorialStep === 2 && marksRef.current[index] === 2) setTutorialStep(3);
-  }, [applyMark, tutorialAllows, tutorialStep]);
+    applyMark(index, marksRef.current[index] === 2 ? 0 : 2, tutorialStep === null, saveHistory, history);
+    if (tutorialStep === 4 && marksRef.current[index] === 2) setTutorialStep(5);
+  };
 
   const handleCellClick = (index: number) => {
     if (suppressClick.current) { suppressClick.current = false; return; }
-    if (tutorialStep !== null && tutorialStep !== 1 && tutorialStep !== 2 && tutorialStep !== 3) return;
+    if (tutorialStep === null && index === puzzle.autoCell) {
+      setMessage("带星标的是系统给定位置，不能拿走；请从它开始排除其他格子。");
+      playSfx("click");
+      return;
+    }
+    if (tutorialStep !== null && tutorialStep !== 2 && tutorialStep !== 4) return;
     if (pendingTap.current?.index === index) {
       clearTimeout(pendingTap.current.timer);
+      const before = pendingTap.current.before;
       pendingTap.current = null;
-      toggleCroissant(index);
+      restoreSnapshot(before, false);
+      setUndoSnapshot(before);
+      toggleCroissant(index, before, false);
       return;
     }
     if (pendingTap.current) {
       clearTimeout(pendingTap.current.timer);
-      markCross(pendingTap.current.index);
+      pendingTap.current = null;
     }
+    const before = makeSnapshot();
+    markCross(index, before);
     const timer = setTimeout(() => {
       pendingTap.current = null;
-      markCross(index);
-    }, 230);
-    pendingTap.current = { index, timer };
+    }, 300);
+    pendingTap.current = { index, timer, before };
   };
 
   const pointerIndex = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -303,23 +381,55 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     return element ? Number(element.dataset.puzzleIndex) : null;
   };
 
+  const paintDragPath = (from: number, to: number) => {
+    const fromRow = Math.floor(from / config.size); const fromCol = from % config.size;
+    const toRow = Math.floor(to / config.size); const toCol = to % config.size;
+    const steps = Math.max(Math.abs(toRow - fromRow), Math.abs(toCol - fromCol));
+    for (let step = 0; step <= steps; step += 1) {
+      const ratio = steps === 0 ? 0 : step / steps;
+      const row = Math.round(fromRow + (toRow - fromRow) * ratio);
+      const col = Math.round(fromCol + (toCol - fromCol) * ratio);
+      const index = row * config.size + col;
+      if (marksRef.current[index] !== 2 && tutorialAllows(index, "cross") && marksRef.current[index] !== 1) {
+        applyMark(index, 1, false, false);
+      }
+    }
+  };
+
+  const activateDrag = (index: number) => {
+    if (dragging.current) return;
+    dragging.current = true;
+    suppressClick.current = true;
+    if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
+    if (dragSnapshot.current) setUndoSnapshot(dragSnapshot.current);
+    dragLastIndex.current = dragStart.current?.index ?? index;
+    paintDragPath(dragLastIndex.current, index);
+    vibrate(14);
+  };
+
   const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>, index: number) => {
     if (marksRef.current[index] === 2 || (tutorialStep !== null && tutorialStep !== 3)) return;
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    dragStart.current = { x: event.clientX, y: event.clientY, index };
+    dragLastIndex.current = index;
+    dragSnapshot.current = makeSnapshot();
     longPressTimer.current = setTimeout(() => {
-      dragging.current = true;
-      suppressClick.current = true;
-      if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
-      if (marksRef.current[index] !== 1) applyMark(index, 1, false);
-      vibrate(18);
-    }, 260);
+      activateDrag(index);
+    }, 140);
   };
 
   const dragAcross = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return;
     const index = pointerIndex(event);
-    if (index === null || marksRef.current[index] === 2 || !tutorialAllows(index, "cross")) return;
-    if (marksRef.current[index] !== 1) applyMark(index, 1, false);
+    if (index === null || !dragStart.current) return;
+    if (!dragging.current) {
+      const distance = Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y);
+      if (distance < 7) return;
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      activateDrag(index);
+    }
+    const previous = dragLastIndex.current ?? index;
+    paintDragPath(previous, index);
+    dragLastIndex.current = index;
     if (tutorialStep === 3 && tutorialDragTargets.every((target) => marksRef.current[target] === 1)) setTutorialStep(4);
   };
 
@@ -327,6 +437,18 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
     longPressTimer.current = null;
     dragging.current = false;
+    dragStart.current = null;
+    dragLastIndex.current = null;
+    dragSnapshot.current = null;
+  };
+
+  const undoLastAction = () => {
+    if (!undoSnapshot || status === "won" || tutorialStep !== null) return;
+    if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
+    restoreSnapshot(undoSnapshot);
+    setShowIdleHint(false);
+    playSfx("click");
+    vibrate(14);
   };
 
   const chooseLevel = (index: number) => {
@@ -349,11 +471,13 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       const value = type === "row" ? row : type === "col" ? col : puzzle.regions[target];
       const label = type === "row" ? `第 ${row + 1} 行` : type === "col" ? `第 ${col + 1} 列` : `颜色区域 ${value + 1}`;
       setScanFocus({ type, value });
+      setUndoSnapshot(makeSnapshot());
       setMessage(`339：观察${label}，有一个位置能同时满足三条规则。`);
       window.setTimeout(() => setScanFocus(null), 2400);
       playSfx("help");
     }
     if (tool === "tidy") {
+      setUndoSnapshot(makeSnapshot());
       const placed = marksRef.current.map((mark, index) => ({ mark, index })).filter(({ mark }) => mark === 2).map(({ index }) => index);
       const next = [...marksRef.current];
       next.forEach((mark, index) => {
@@ -404,6 +528,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
   };
 
   const placedCount = marks.filter((mark) => mark === 2).length;
+  const conflictTypes = useMemo(() => conflictTypesFor(marks, config.size, puzzle.regions), [config.size, marks, puzzle.regions]);
   const allMuted = !musicEnabled && !sfxEnabled;
 
   return (
@@ -426,8 +551,19 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
       <section className={`platter-panel ${status}`} aria-label={`牛角包摆盘第 ${levelIndex + 1} 关`}>
         <div className="platter-levelbar">
           <button className="level-menu-button pressable" onClick={() => setShowLevelPicker(true)}><span>第 {levelIndex + 1} 关</span><small>{config.size} × {config.size} ▾</small></button>
-          <div className="platter-progress"><span>已摆</span><b>{placedCount}/{config.size}</b></div>
+          <div className="platter-progress"><span>还需摆放</span><b>{Math.max(0, config.size - placedCount)}</b></div>
           <div className={`mistake-meter ${mistakes > config.mistakeLimit ? "danger" : ""}`}><span>失误</span><b>{mistakes}/{config.mistakeLimit}</b></div>
+        </div>
+
+        <div className={`puzzle-rule-strip ${tutorialStep === 1 ? "tutorial-target" : ""}`} aria-label="摆盘三条规则">
+          <span className={conflictTypes.has("region") ? "rule-error" : ""}><b>颜色</b><small>每色 1 个</small></span>
+          <span className={conflictTypes.has("line") ? "rule-error" : ""}><b>行和列</b><small>各 1 个</small></span>
+          <span className={conflictTypes.has("adjacent") ? "rule-error" : ""}><b>不相邻</b><small>横竖斜都不挨</small></span>
+        </div>
+
+        <div className={`puzzle-feedback ${conflicts.size ? "error" : ""}`} role="status">
+          <span>{conflicts.size ? "!" : "✓"}</span>
+          <b>{conflicts.size ? conflictMessage(conflictTypes) : "系统已先放好 1 个。现在根据三条规则排除其他格子。"}</b>
         </div>
 
         <div
@@ -447,13 +583,13 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
             const leftDifferent = col === 0 || puzzle.regions[index - 1] !== region;
             const rightDifferent = col === config.size - 1 || puzzle.regions[index + 1] !== region;
             const bottomDifferent = row === config.size - 1 || puzzle.regions[index + config.size] !== region;
-            const tutorialTarget = (tutorialStep === 1 && index === tutorialCrossTarget) || (tutorialStep === 2 && index === tutorialSolutionCell) || (tutorialStep === 3 && tutorialDragTargets.includes(index));
+            const tutorialTarget = (tutorialStep === 1 && index === tutorialAutoCell) || (tutorialStep === 2 && index === tutorialCrossTarget) || (tutorialStep === 3 && tutorialDragTargets.includes(index)) || (tutorialStep === 4 && index === tutorialNextSolutionCell);
             const scanHighlighted = (scanFocus?.type === "row" && row === scanFocus.value) || (scanFocus?.type === "col" && col === scanFocus.value) || (scanFocus?.type === "region" && region === scanFocus.value);
             return (
               <button
                 key={index}
                 data-puzzle-index={index}
-                className={`puzzle-cell ${mark === 1 ? "crossed" : ""} ${mark === 2 ? "has-croissant" : ""} ${conflicts.has(index) ? "conflict" : ""} ${tutorialTarget ? "tutorial-target" : ""} ${scanHighlighted ? "scan-focus" : ""}`}
+                className={`puzzle-cell ${mark === 1 ? "crossed" : ""} ${mark === 2 ? "has-croissant" : ""} ${index === puzzle.autoCell ? "system-anchor" : ""} ${conflicts.has(index) ? "conflict" : ""} ${tutorialTarget ? "tutorial-target" : ""} ${scanHighlighted ? "scan-focus" : ""}`}
                 style={{
                   "--region": REGION_COLORS[region % REGION_COLORS.length],
                   borderTopWidth: topDifferent ? 3 : 1,
@@ -462,7 +598,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
                   borderBottomWidth: bottomDifferent ? 3 : 1,
                 } as CSSProperties}
                 role="gridcell"
-                aria-label={`第 ${row + 1} 行第 ${col + 1} 列，颜色区域 ${region + 1}${mark === 1 ? "，已排除" : mark === 2 ? "，已放牛角包" : "，空格"}`}
+                aria-label={`第 ${row + 1} 行第 ${col + 1} 列，颜色区域 ${region + 1}${index === puzzle.autoCell ? "，系统给定牛角包" : mark === 1 ? "，已排除" : mark === 2 ? "，已放牛角包" : "，空格"}`}
                 onPointerDown={(event) => beginDrag(event, index)}
                 onPointerUp={endDrag}
                 onClick={() => handleCellClick(index)}
@@ -475,9 +611,12 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
           })}
         </div>
 
-        <p className="platter-gesture-tip">单击打 × · 双击摆牛角包 · 按住划过可批量排除</p>
+        <div className="platter-action-row">
+          <p className="platter-gesture-tip">单击 × · 双击摆放 · 按住滑动批量 ×</p>
+          <button className="platter-undo pressable" onClick={undoLastAction} disabled={!undoSnapshot || status === "won" || tutorialStep !== null}><span>↶</span><b>撤回一步</b><small>{undoSnapshot ? "恢复棋盘与失误" : "暂无记录"}</small></button>
+        </div>
 
-        <div className={`platter-tools ${tutorialStep === 4 ? "tutorial-target" : ""}`}>
+        <div className={`platter-tools ${tutorialStep === 5 ? "tutorial-target" : ""}`}>
           <button className="prop-button pressable" onClick={() => handleTool("scan")} disabled={toolsLeft.scan <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>339扫描</b><small>提示一行</small></span><i>{toolsLeft.scan}</i></button>
           <button className="prop-button pressable" onClick={() => handleTool("tidy")} disabled={toolsLeft.tidy <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><span><b>小顾整理</b><small>批量排除</small></span><i>{toolsLeft.tidy}</i></button>
           <button className="prop-button pressable" onClick={() => handleTool("intuition")} disabled={toolsLeft.intuition <= 0 || tutorialStep !== null}><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><span><b>小温直觉</b><small>摆对一个</small></span><i>{toolsLeft.intuition}</i></button>
@@ -490,6 +629,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
             <img src={`${ASSET_ROOT}/${status === "won" ? "success-bakery.jpg" : "xiaowen.png"}`} alt="" />
             <div><small>{status === "won" ? "LEVEL CLEAR" : "TRY A NEW PLATE"}</small><h2>{status === "won" ? `第 ${levelIndex + 1} 关完成！` : "摆盘需要调整一下"}</h2><p>{status === "won" ? "每个区域和每行每列都刚刚好。" : "重试会生成同尺寸、但颜色区域不同的新棋盘。"}</p></div>
             <div className="result-actions">
+              {status === "failed" && undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastAction}>撤回这步</button>}
               {status === "won" && levelIndex < 11 ? <button className="result-button pressable" onClick={() => resetBoard(levelIndex + 1, 0)}>下一关</button> : status === "won" ? <button className="result-button pressable" onClick={() => setShowLevelPicker(true)}>查看全部关卡</button> : <button className="result-button pressable" onClick={() => resetBoard(levelIndex, variant + 1)}>换盘重试</button>}
             </div>
           </section>
@@ -498,14 +638,15 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
 
       {(!tutorialReady || tutorialStep !== null) && <div className="tutorial-shield" aria-hidden="true" />}
       {tutorialStep !== null && (
-        <section className={`tutorial-coach platter-tutorial ${tutorialStep === 0 || tutorialStep === 5 ? "centered" : ""} ${tutorialStep === 4 ? "upper" : ""}`} role="dialog" aria-modal="true" aria-live="polite">
-          <div className="tutorial-head"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" /><span>小温的摆盘课</span><b>{tutorialStep === 0 ? "欢迎" : tutorialStep === 5 ? "完成" : `${tutorialStep}/4`}</b></div>
-          {tutorialStep === 0 && <><h2>欢迎来到牛角包摆盘！</h2><p>我是小温，接下来只能操作高亮区域。跟我走完固定 4×4 练习盘，再开始正式第 1 关。</p><button className="tutorial-button pressable" onClick={startTutorial}>开始教学</button></>}
-          {tutorialStep === 1 && <><h2>① 先排除不能放的位置</h2><p>高亮格肯定不能放牛角包，单击它打一个 ×。</p><span className="tutorial-wait">等待你单击高亮格…</span></>}
-          {tutorialStep === 2 && <><h2>② 摆下第一个牛角包</h2><p>这个位置同时满足颜色、行列和不相邻规则。请快速双击高亮格。</p><span className="tutorial-wait">等待你双击摆放…</span></>}
-          {tutorialStep === 3 && <><h2>③ 批量排除更快</h2><p>按住第一个高亮格，再拖动划过另外两格，一次把它们都打上 ×。</p><span className="tutorial-wait">等待你按住并划过…</span></>}
-          {tutorialStep === 4 && <><h2>④ 认识三位帮手</h2><div className="tutorial-props-list"><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>高亮一行、列或区域，提示推理方向</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量打 ×，清掉已确定不能放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>头像变灰代表本关次数用完。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(5)}>我学会了</button></>}
-          {tutorialStep === 5 && <><h2>现在开始第 1 关吧！</h2><p>目标是摆满 {config.size} 个牛角包：每种颜色、每行、每列各一个，而且任何两个都不能相邻。</p><button className="tutorial-button pressable" onClick={finishTutorial}>进入正式关卡</button></>}
+        <section className={`tutorial-coach platter-tutorial ${tutorialStep === 0 || tutorialStep === 6 ? "centered" : ""} ${tutorialStep === 5 ? "upper" : ""}`} role="dialog" aria-modal="true" aria-live="polite">
+          <div className="tutorial-head"><img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" /><span>小温的摆盘课</span><b>{tutorialStep === 0 ? "玩法" : tutorialStep === 6 ? "完成" : `${tutorialStep}/5`}</b></div>
+          {tutorialStep === 0 && <><h2>目标：找出所有牛角包的位置</h2><p>一盘有多块颜色区域。你要在每种颜色里放 1 个，同时每行、每列也只能有 1 个，两个牛角包连斜角都不能挨着。</p><div className="tutorial-rule-summary"><b>每色 1 个</b><b>每行列 1 个</b><b>横竖斜不相邻</b></div><p>系统会先放好 1 个，再由你推理剩下的位置。</p><button className="tutorial-button pressable" onClick={startTutorial}>用 4×4 练习盘学会</button></>}
+          {tutorialStep === 1 && <><h2>① 系统先放好了一个</h2><p>看高亮牛角包：它所在的<b>颜色区域、整行、整列，以及周围 8 格</b>都不能再放。上方三条规则会一直显示。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(2)}>明白，从它开始排除</button></>}
+          {tutorialStep === 2 && <><h2>② 单击标记“不能放”</h2><p>高亮格与已有牛角包在同一行，所以肯定不能放。单击它打 ×。</p><span className="tutorial-wait">等待你单击高亮格…</span></>}
+          {tutorialStep === 3 && <><h2>③ 滑动可以连续排除</h2><p>这 3 格与已有牛角包在同一列。按住第一格并向下划过，系统会自动补齐中间经过的格子。</p><span className="tutorial-wait">等待你按住并滑过 3 格…</span></>}
+          {tutorialStep === 4 && <><h2>④ 双击摆放下一个</h2><p>排除后，高亮位置满足颜色、行列和不相邻三条规则。请快速双击摆下牛角包。</p><span className="tutorial-wait">等待你双击高亮格…</span></>}
+          {tutorialStep === 5 && <><h2>⑤ 点错也不用慌</h2><div className="tutorial-props-list"><span><span className="tutorial-undo-icon">↶</span><b>撤回一步</b><small>棋盘、失误次数和道具都会一起恢复</small></span><span><img src={`${ASSET_ROOT}/339.png`} alt="" /><b>339 扫描</b><small>高亮一行、列或区域，提示推理方向</small></span><span><img src={`${ASSET_ROOT}/xiaogu.png`} alt="" /><b>小顾整理</b><small>批量排除已经确定不能放的位置</small></span><span><img src={`${ASSET_ROOT}/xiaowen.png`} alt="" /><b>小温直觉</b><small>直接摆好一个确定正确的牛角包</small></span></div><p>如果摆放冲突，对应规则会变红并写清原因。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(6)}>我学会了</button></>}
+          {tutorialStep === 6 && <><h2>现在开始第 1 关吧！</h2><p>系统已经替你放好第一个牛角包。先给它同颜色、同行列和相邻的位置打 ×，再继续推理。</p><button className="tutorial-button pressable" onClick={finishTutorial}>进入正式关卡</button></>}
         </section>
       )}
 
@@ -533,7 +674,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
             <button className="modal-close pressable" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
             <span className="mission-tag">摆盘规则</span><h2>三个条件要同时满足</h2>
-            <ol><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击打 ×，双击摆放或拿走，按住划过可批量打 ×。</li><li><b>冲突提示</b>：红框只提醒，不会阻止操作；超过本关失误上限才会失败。</li></ol>
+            <ol><li><b>开局给定</b>：系统先放好一个带星标的牛角包，它不能拿走，是整盘推理的起点。</li><li><b>颜色唯一</b>：每种颜色区域恰好放 1 个牛角包。</li><li><b>行列唯一</b>：每一行、每一列恰好放 1 个。</li><li><b>不能相邻</b>：横、竖、斜方向挨着都不可以。</li><li><b>操作</b>：单击立即打 ×，双击摆放或拿走；按住或直接滑动会连续补齐 ×。</li><li><b>错误与撤回</b>：冲突格和对应规则会变红并说明原因；“撤回一步”会一起恢复棋盘、失误和道具。</li></ol>
             <button className="primary-button pressable" onClick={() => setShowRules(false)}>继续摆盘</button>
           </section>
         </div>
