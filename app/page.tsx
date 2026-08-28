@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useGameAudio } from "./useGameAudio";
 
 type Breakfast = "croissant" | "bread" | null;
 type GameStatus = "idle" | "playing" | "won" | "lost";
@@ -129,9 +130,25 @@ export default function Home() {
   const [hintCell, setHintCell] = useState<number | null>(null);
   const [message, setMessage] = useState("小顾出发啦！帮小温找到最喜欢的牛角包。");
   const [showHelp, setShowHelp] = useState(false);
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [best, setBest] = useState<number | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressClickUntil = useRef(0);
+  const {
+    audioUnlocked,
+    musicEnabled,
+    musicLoop,
+    musicVolume,
+    playSfx,
+    setMusicEnabled,
+    setMusicLoop,
+    setMusicVolume,
+    setSfxEnabled,
+    setSfxVolume,
+    sfxEnabled,
+    sfxVolume,
+    unlockAudio,
+  } = useGameAudio();
 
   useEffect(() => {
     const saved = window.localStorage.getItem(`bakery-best-${difficulty}`);
@@ -150,6 +167,7 @@ export default function Home() {
   }, [status]);
 
   const restart = useCallback((nextDifficulty: DifficultyKey = difficulty) => {
+    playSfx("click");
     const next = DIFFICULTIES[nextDifficulty];
     setDifficulty(nextDifficulty);
     setBreakfastGoal(randomBreakfastGoal(nextDifficulty));
@@ -161,7 +179,7 @@ export default function Home() {
     setScanUsed(false);
     setHintCell(null);
     setMessage("小顾出发啦！帮小温找到最喜欢的牛角包。");
-  }, [difficulty]);
+  }, [difficulty, playSfx]);
 
   const breakfastFound = useMemo(
     () => {
@@ -173,6 +191,7 @@ export default function Home() {
   const flagsUsed = useMemo(() => cells.filter((cell) => cell.flagged).length, [cells]);
 
   const finishWin = useCallback((time: number) => {
+    playSfx("win");
     setStatus("won");
     setMessage("扫雷完成！339 送上最后一份牛角包，小温的早餐收集完毕 ♡");
     vibrate([45, 35, 45, 35, 80]);
@@ -182,7 +201,7 @@ export default function Home() {
       window.localStorage.setItem(storageKey, String(time));
       setBest(time);
     }
-  }, [difficulty]);
+  }, [difficulty, playSfx]);
 
   const reveal = useCallback((index: number) => {
     if (status === "won" || status === "lost") return;
@@ -200,6 +219,7 @@ export default function Home() {
       setCells(lostBoard);
       setStatus("lost");
       setMessage("烤过头啦！339 已启动厨房降温程序。");
+      playSfx("lose");
       vibrate([100, 55, 140]);
       return;
     }
@@ -215,7 +235,8 @@ export default function Home() {
       vibrate(35);
     }
     if (next.every((cell) => cell.mine || cell.revealed)) finishWin(seconds);
-  }, [breakfastGoal, cells, config, finishWin, generated, seconds, status]);
+    else playSfx("reveal");
+  }, [breakfastGoal, cells, config, finishWin, generated, playSfx, seconds, status]);
 
   const toggleFlag = useCallback((index: number) => {
     if (status === "won" || status === "lost" || cells[index].revealed) return;
@@ -227,8 +248,9 @@ export default function Home() {
       cellIndex === index ? { ...cell, flagged: !cell.flagged } : cell,
     ));
     setMessage(cells[index].flagged ? "收回一张小顾贴纸。" : "小顾贴纸：这里可能有烤焦面包！" );
+    playSfx("flag");
     vibrate(22);
-  }, [cells, config.mines, flagsUsed, status]);
+  }, [cells, config.mines, flagsUsed, playSfx, status]);
 
   const handleCellClick = (index: number) => {
     if (hintCell !== null) return;
@@ -252,12 +274,14 @@ export default function Home() {
   };
 
   const closeHelp = () => {
+    playSfx("click");
     window.localStorage.setItem("bakery-guide-seen", "1");
     setShowHelp(false);
   };
 
   const useScan = () => {
     if (scanUsed) return;
+    playSfx("help");
     if (!generated) {
       setMessage("339：先翻开一格，我才能校准安全扫描。");
       vibrate(18);
@@ -285,7 +309,7 @@ export default function Home() {
       : message;
 
   return (
-    <main className="game-shell">
+    <main className="game-shell" onPointerDown={unlockAudio}>
       <img className="floating-food floating-croissant" src={`${ASSET_ROOT}/croissant.png`} alt="" aria-hidden="true" />
       <img className="floating-food floating-bread" src={`${ASSET_ROOT}/bread.png`} alt="" aria-hidden="true" />
 
@@ -295,7 +319,14 @@ export default function Home() {
           <p className="eyebrow">339&apos;s bakery protocol</p>
           <h1>心动烘焙扫雷</h1>
         </div>
-        <button className="round-button pressable" onClick={() => setShowHelp(true)} aria-label="查看游戏说明">?</button>
+        <div className="top-actions">
+          <button
+            className={`round-button audio-button pressable ${!musicEnabled && !sfxEnabled ? "muted" : ""}`}
+            onClick={() => { playSfx("click"); setShowAudioSettings(true); }}
+            aria-label="打开声音设置"
+          >♫</button>
+          <button className="round-button pressable" onClick={() => { playSfx("click"); setShowHelp(true); }} aria-label="查看游戏说明">?</button>
+        </div>
       </header>
 
       <section className="mission-card" aria-label="剧情任务">
@@ -381,7 +412,7 @@ export default function Home() {
         </div>
 
         <div className="tool-row">
-          <button className={`tool-button pressable ${flagMode ? "active" : ""}`} onClick={() => setFlagMode((value) => !value)} aria-pressed={flagMode}>
+          <button className={`tool-button pressable ${flagMode ? "active" : ""}`} onClick={() => { playSfx("click"); setFlagMode((value) => !value); }} aria-pressed={flagMode}>
             <span className="tool-icon"><img className="flag-mode-avatar" src={`${ASSET_ROOT}/xiaogu.png`} alt="" /></span><span><b>{flagMode ? "小顾标记" : "轻点翻格"}</b><small>{flagMode ? `${flagsUsed}/${config.mines} 张贴纸` : "点按切换模式"}</small></span>
           </button>
           <button className="tool-button scan-button pressable" onClick={useScan} disabled={scanUsed}>
@@ -429,6 +460,63 @@ export default function Home() {
               <li><b>怎样算赢</b>：早餐目标会随机（简单 3–5、中等 5–8、复杂 8–12），最后一份只在扫雷完成时获得。</li>
             </ol>
             <button className="primary-button pressable" onClick={closeHelp}>明白，开始找牛角包</button>
+          </section>
+        </div>
+      )}
+
+      {showAudioSettings && (
+        <div className="modal-backdrop" onMouseDown={() => { playSfx("click"); setShowAudioSettings(false); }}>
+          <section className="audio-modal" role="dialog" aria-modal="true" aria-labelledby="audio-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close pressable" onClick={() => { playSfx("click"); setShowAudioSettings(false); }} aria-label="关闭声音设置">×</button>
+            <div className="audio-robot"><img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" /><span>♫</span></div>
+            <span className="mission-tag">339 音频控制台</span>
+            <h2 id="audio-title">让烘焙屋听起来刚刚好</h2>
+            <p className="audio-status">{audioUnlocked ? "声音已启用，设置会保存在这台设备上。" : "轻点页面后，浏览器才会允许播放声音。"}</p>
+
+            <div className="audio-control-group">
+              <div className="audio-control-heading">
+                <span><b>背景音乐</b><small>烘焙店循环 BGM</small></span>
+                <button
+                  className={`sound-switch ${musicEnabled ? "on" : ""}`}
+                  role="switch"
+                  aria-checked={musicEnabled}
+                  onClick={() => { playSfx("click"); setMusicEnabled((value) => !value); }}
+                ><i /></button>
+              </div>
+              <label className="volume-row">
+                <span>音乐音量</span>
+                <input type="range" min="0" max="100" value={Math.round(musicVolume * 100)} onChange={(event) => setMusicVolume(Number(event.target.value) / 100)} />
+                <output>{Math.round(musicVolume * 100)}%</output>
+              </label>
+              <div className="audio-control-heading loop-row">
+                <span><b>循环播放</b><small>关闭后播完即停止</small></span>
+                <button
+                  className={`sound-switch ${musicLoop ? "on" : ""}`}
+                  role="switch"
+                  aria-checked={musicLoop}
+                  onClick={() => { playSfx("click"); setMusicLoop((value) => !value); }}
+                ><i /></button>
+              </div>
+            </div>
+
+            <div className="audio-control-group">
+              <div className="audio-control-heading">
+                <span><b>游戏音效</b><small>翻格、提示与胜负反馈</small></span>
+                <button
+                  className={`sound-switch ${sfxEnabled ? "on" : ""}`}
+                  role="switch"
+                  aria-checked={sfxEnabled}
+                  onClick={() => { if (sfxEnabled) playSfx("click"); setSfxEnabled((value) => !value); }}
+                ><i /></button>
+              </div>
+              <label className="volume-row">
+                <span>音效音量</span>
+                <input type="range" min="0" max="100" value={Math.round(sfxVolume * 100)} onChange={(event) => setSfxVolume(Number(event.target.value) / 100)} />
+                <output>{Math.round(sfxVolume * 100)}%</output>
+              </label>
+            </div>
+
+            <p className="mix-note">播放提示、胜利或失败音效时，BGM 会自动降低音量，避免互相打架。</p>
           </section>
         </div>
       )}
