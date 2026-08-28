@@ -15,12 +15,17 @@ type Cell = {
 };
 
 const DIFFICULTIES = {
-  cozy: { label: "简单", rows: 9, cols: 9, mines: 10, breakfast: 4 },
-  date: { label: "中等", rows: 10, cols: 10, mines: 16, breakfast: 5 },
-  robot: { label: "复杂", rows: 11, cols: 11, mines: 23, breakfast: 6 },
+  cozy: { label: "简单", rows: 9, cols: 9, mines: 10, breakfast: { min: 3, max: 5 } },
+  date: { label: "中等", rows: 10, cols: 10, mines: 16, breakfast: { min: 5, max: 8 } },
+  robot: { label: "复杂", rows: 11, cols: 11, mines: 23, breakfast: { min: 8, max: 12 } },
 } as const;
 
 const ASSET_ROOT = "assets";
+
+function randomBreakfastGoal(difficulty: DifficultyKey) {
+  const { min, max } = DIFFICULTIES[difficulty].breakfast;
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
 
 const emptyCells = (count: number): Cell[] =>
   Array.from({ length: count }, () => ({
@@ -114,6 +119,7 @@ function vibrate(pattern: number | number[]) {
 export default function Home() {
   const [difficulty, setDifficulty] = useState<DifficultyKey>("cozy");
   const config = DIFFICULTIES[difficulty];
+  const [breakfastGoal, setBreakfastGoal] = useState(DIFFICULTIES.cozy.breakfast.min);
   const [cells, setCells] = useState<Cell[]>(() => emptyCells(config.rows * config.cols));
   const [status, setStatus] = useState<GameStatus>("idle");
   const [generated, setGenerated] = useState(false);
@@ -134,6 +140,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!window.localStorage.getItem("bakery-guide-seen")) setShowHelp(true);
+    setBreakfastGoal(randomBreakfastGoal("cozy"));
   }, []);
 
   useEffect(() => {
@@ -145,6 +152,7 @@ export default function Home() {
   const restart = useCallback((nextDifficulty: DifficultyKey = difficulty) => {
     const next = DIFFICULTIES[nextDifficulty];
     setDifficulty(nextDifficulty);
+    setBreakfastGoal(randomBreakfastGoal(nextDifficulty));
     setCells(emptyCells(next.rows * next.cols));
     setStatus("idle");
     setGenerated(false);
@@ -156,14 +164,17 @@ export default function Home() {
   }, [difficulty]);
 
   const breakfastFound = useMemo(
-    () => cells.filter((cell) => cell.revealed && cell.breakfast).length,
-    [cells],
+    () => {
+      const foundOnBoard = cells.filter((cell) => cell.revealed && cell.breakfast).length;
+      return status === "won" ? Math.min(breakfastGoal, foundOnBoard + 1) : foundOnBoard;
+    },
+    [breakfastGoal, cells, status],
   );
   const flagsUsed = useMemo(() => cells.filter((cell) => cell.flagged).length, [cells]);
 
   const finishWin = useCallback((time: number) => {
     setStatus("won");
-    setMessage("任务完成！小温收到了小顾准备的早餐 ♡");
+    setMessage("扫雷完成！339 送上最后一份牛角包，小温的早餐收集完毕 ♡");
     vibrate([45, 35, 45, 35, 80]);
     const storageKey = `bakery-best-${difficulty}`;
     const previous = Number(window.localStorage.getItem(storageKey) || 0);
@@ -177,7 +188,7 @@ export default function Home() {
     if (status === "won" || status === "lost") return;
     let working = cells;
     if (!generated) {
-      working = buildBoard(config.rows, config.cols, config.mines, config.breakfast, index);
+      working = buildBoard(config.rows, config.cols, config.mines, breakfastGoal - 1, index);
       setGenerated(true);
       setStatus("playing");
       setMessage("339：扫描正常！数字是周围烤焦面包的数量。");
@@ -192,14 +203,19 @@ export default function Home() {
       vibrate([100, 55, 140]);
       return;
     }
+    const foundBeforeReveal = working.filter((cell) => cell.revealed && cell.breakfast).length;
     const next = floodReveal(working, index, config.rows, config.cols);
     setCells(next);
-    if (chosen.breakfast) {
-      setMessage(chosen.breakfast === "croissant" ? "找到牛角包！小温的眼睛亮起来了。" : "找到软面包！早餐篮更香了。" );
+    const foundAfterReveal = next.filter((cell) => cell.revealed && cell.breakfast).length;
+    if (foundAfterReveal > foundBeforeReveal && foundAfterReveal === breakfastGoal - 1) {
+      setMessage("棋盘里的早餐都找到了！完成扫雷即可解锁最后一份牛角包。");
+      vibrate(35);
+    } else if (foundAfterReveal > foundBeforeReveal) {
+      setMessage("找到新的早餐！小温的眼睛亮起来了。");
       vibrate(35);
     }
     if (next.every((cell) => cell.mine || cell.revealed)) finishWin(seconds);
-  }, [cells, config, finishWin, generated, seconds, status]);
+  }, [breakfastGoal, cells, config, finishWin, generated, seconds, status]);
 
   const toggleFlag = useCallback((index: number) => {
     if (status === "won" || status === "lost" || cells[index].revealed) return;
@@ -320,7 +336,7 @@ export default function Home() {
         <div className="status-row">
           <div className="status-pill breakfast-counter">
             <span className="mini-foods"><img src={`${ASSET_ROOT}/croissant.png`} alt="" /><img src={`${ASSET_ROOT}/bread.png`} alt="" /></span>
-            <span>早餐</span><strong>{breakfastFound}/{config.breakfast}</strong>
+            <span>早餐</span><strong>{breakfastFound}/{breakfastGoal}</strong>
           </div>
           <button className="face-button pressable" onClick={() => restart()} aria-label="重新开始">
             <img src={`${ASSET_ROOT}/339.png`} alt="" />
@@ -389,7 +405,7 @@ export default function Home() {
                 <img src={`${ASSET_ROOT}/xiaowen.png`} alt="小温" />
               </div>
             )}
-            <div><strong>{status === "won" ? "早餐约会达成！" : "这炉烤过头啦"}</strong><p>{status === "won" ? `用时 ${seconds} 秒，收集了全部 ${config.breakfast} 份早餐。` : "别担心，第一格永远安全，再试一次吧。"}</p></div>
+            <div><strong>{status === "won" ? "早餐约会达成！" : "这炉烤过头啦"}</strong><p>{status === "won" ? `用时 ${seconds} 秒，完成扫雷并收集了全部 ${breakfastGoal} 份早餐。` : "别担心，第一格永远安全，再试一次吧。"}</p></div>
             <button className="result-button pressable" onClick={() => restart()}>{status === "won" ? "再送一份" : "重新烘焙"}</button>
           </div>
         )}
@@ -410,7 +426,7 @@ export default function Home() {
               <li><b>先轻点一格</b>：格子会翻开，而且开局第一格一定安全。</li>
               <li><b>看懂数字</b>：数字是它周围 8 格中“烤焦面包”的数量。</li>
               <li><b>怀疑有危险就长按</b>：约 0.3 秒贴上小顾；再次长按可以收回。</li>
-              <li><b>怎样算赢</b>：翻开所有安全格、找齐早餐；卡住时可用一次 339 扫描。</li>
+              <li><b>怎样算赢</b>：早餐目标会随机（简单 3–5、中等 5–8、复杂 8–12），最后一份只在扫雷完成时获得。</li>
             </ol>
             <button className="primary-button pressable" onClick={closeHelp}>明白，开始找牛角包</button>
           </section>
