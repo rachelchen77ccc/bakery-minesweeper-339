@@ -6,6 +6,7 @@ import { useGameAudio } from "./useGameAudio";
 type Breakfast = "croissant" | "bread" | null;
 type GameStatus = "idle" | "playing" | "won" | "lost";
 type DifficultyKey = "cozy" | "date" | "robot";
+type TutorialStep = 0 | 1 | 2 | 3 | 4 | 5 | null;
 
 type Cell = {
   mine: boolean;
@@ -15,6 +16,16 @@ type Cell = {
   breakfast: Breakfast;
 };
 
+type GameSnapshot = {
+  cells: Cell[];
+  status: GameStatus;
+  generated: boolean;
+  seconds: number;
+  scanUsed: boolean;
+  message: string;
+  best: number | null;
+};
+
 const DIFFICULTIES = {
   cozy: { label: "简单", rows: 9, cols: 9, mines: 10, breakfast: { min: 3, max: 5 } },
   date: { label: "中等", rows: 10, cols: 10, mines: 16, breakfast: { min: 5, max: 8 } },
@@ -22,6 +33,7 @@ const DIFFICULTIES = {
 } as const;
 
 const ASSET_ROOT = "assets";
+const TUTORIAL_REVEAL_TARGET = 40;
 
 function randomBreakfastGoal(difficulty: DifficultyKey) {
   const { min, max } = DIFFICULTIES[difficulty].breakfast;
@@ -125,7 +137,6 @@ export default function Home() {
   const [status, setStatus] = useState<GameStatus>("idle");
   const [generated, setGenerated] = useState(false);
   const [seconds, setSeconds] = useState(0);
-  const [flagMode, setFlagMode] = useState(false);
   const [scanUsed, setScanUsed] = useState(false);
   const [hintCell, setHintCell] = useState<number | null>(null);
   const [message, setMessage] = useState("小顾出发啦！帮小温找到最喜欢的牛角包。");
@@ -133,8 +144,11 @@ export default function Home() {
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [best, setBest] = useState<number | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressClickUntil = useRef(0);
+  const [undoSnapshot, setUndoSnapshot] = useState<GameSnapshot | null>(null);
+  const [tutorialStep, setTutorialStep] = useState<TutorialStep>(null);
+  const [tutorialFlagTarget, setTutorialFlagTarget] = useState<number | null>(null);
+  const [tutorialChecked, setTutorialChecked] = useState(false);
+  const pendingTap = useRef<{ index: number; timer: ReturnType<typeof setTimeout> } | null>(null);
   const {
     audioUnlocked,
     musicEnabled,
@@ -157,8 +171,9 @@ export default function Home() {
   }, [difficulty]);
 
   useEffect(() => {
-    if (!window.localStorage.getItem("bakery-guide-seen")) setShowHelp(true);
     setBreakfastGoal(randomBreakfastGoal("cozy"));
+    if (!window.localStorage.getItem("bakery-tutorial-complete")) setTutorialStep(0);
+    setTutorialChecked(true);
   }, []);
 
   useEffect(() => {
@@ -167,8 +182,28 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [isPaused, status]);
 
+  useEffect(() => () => {
+    if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+  }, []);
+
+  useEffect(() => {
+    if (tutorialStep === 1 && cells[TUTORIAL_REVEAL_TARGET]?.revealed) {
+      const nextCovered = cells.findIndex((cell) => !cell.revealed && !cell.flagged);
+      if (nextCovered >= 0) {
+        setTutorialFlagTarget(nextCovered);
+        setTutorialStep(2);
+      }
+    }
+    if (tutorialStep === 2 && tutorialFlagTarget !== null && cells[tutorialFlagTarget]?.flagged) {
+      setTutorialStep(3);
+    }
+    if (tutorialStep === 4 && scanUsed && hintCell === null) setTutorialStep(5);
+  }, [cells, hintCell, scanUsed, tutorialFlagTarget, tutorialStep]);
+
   const restart = useCallback((nextDifficulty: DifficultyKey = difficulty) => {
     playSfx("click");
+    if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+    pendingTap.current = null;
     const next = DIFFICULTIES[nextDifficulty];
     setDifficulty(nextDifficulty);
     setBreakfastGoal(randomBreakfastGoal(nextDifficulty));
@@ -176,10 +211,11 @@ export default function Home() {
     setStatus("idle");
     setGenerated(false);
     setSeconds(0);
-    setFlagMode(false);
     setScanUsed(false);
     setHintCell(null);
     setIsPaused(false);
+    setUndoSnapshot(null);
+    setTutorialFlagTarget(null);
     setMessage("小顾出发啦！帮小温找到最喜欢的牛角包。");
   }, [difficulty, playSfx]);
 
@@ -191,6 +227,39 @@ export default function Home() {
     [breakfastGoal, cells, status],
   );
   const flagsUsed = useMemo(() => cells.filter((cell) => cell.flagged).length, [cells]);
+
+  const saveUndoSnapshot = useCallback(() => {
+    setUndoSnapshot({
+      cells: cells.map((cell) => ({ ...cell })),
+      status,
+      generated,
+      seconds,
+      scanUsed,
+      message,
+      best,
+    });
+  }, [best, cells, generated, message, scanUsed, seconds, status]);
+
+  const undoLastStep = useCallback(() => {
+    if (!undoSnapshot || isPaused || (tutorialStep !== null && tutorialStep !== 3)) return;
+    if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+    pendingTap.current = null;
+    setCells(undoSnapshot.cells.map((cell) => ({ ...cell })));
+    setStatus(undoSnapshot.status);
+    setGenerated(undoSnapshot.generated);
+    setSeconds(undoSnapshot.seconds);
+    setScanUsed(undoSnapshot.scanUsed);
+    setHintCell(null);
+    setBest(undoSnapshot.best);
+    const storageKey = `bakery-best-${difficulty}`;
+    if (undoSnapshot.best === null) window.localStorage.removeItem(storageKey);
+    else window.localStorage.setItem(storageKey, String(undoSnapshot.best));
+    setMessage("339：上一步已经撤回啦。");
+    setUndoSnapshot(null);
+    if (tutorialStep === 3) setTutorialStep(4);
+    playSfx("click");
+    vibrate(18);
+  }, [difficulty, isPaused, playSfx, tutorialStep, undoSnapshot]);
 
   const finishWin = useCallback((time: number) => {
     playSfx("win");
@@ -207,15 +276,19 @@ export default function Home() {
 
   const reveal = useCallback((index: number) => {
     if (status === "won" || status === "lost" || isPaused) return;
+    if (tutorialStep !== null && tutorialStep !== 1 && tutorialStep !== 4) return;
+    if (tutorialStep === 1 && index !== TUTORIAL_REVEAL_TARGET) return;
     let working = cells;
     if (!generated) {
       working = buildBoard(config.rows, config.cols, config.mines, breakfastGoal - 1, index);
+      cells.forEach((cell, cellIndex) => { if (cell.flagged) working[cellIndex].flagged = true; });
       setGenerated(true);
       setStatus("playing");
       setMessage("339：扫描正常！数字是周围烤焦面包的数量。");
     }
     const chosen = working[index];
     if (chosen.revealed || chosen.flagged) return;
+    saveUndoSnapshot();
     if (chosen.mine) {
       const lostBoard = working.map((cell) => cell.mine ? { ...cell, revealed: true } : cell);
       setCells(lostBoard);
@@ -226,7 +299,9 @@ export default function Home() {
       return;
     }
     const foundBeforeReveal = working.filter((cell) => cell.revealed && cell.breakfast).length;
-    const next = floodReveal(working, index, config.rows, config.cols);
+    const next = tutorialStep === 1
+      ? working.map((cell, cellIndex) => cellIndex === index ? { ...cell, revealed: true } : { ...cell })
+      : floodReveal(working, index, config.rows, config.cols);
     setCells(next);
     const foundAfterReveal = next.filter((cell) => cell.revealed && cell.breakfast).length;
     if (foundAfterReveal > foundBeforeReveal && foundAfterReveal === breakfastGoal - 1) {
@@ -236,43 +311,46 @@ export default function Home() {
       setMessage("找到新的早餐！小温的眼睛亮起来了。");
       vibrate(35);
     }
-    if (next.every((cell) => cell.mine || cell.revealed)) finishWin(seconds);
+    if (tutorialStep === null && next.every((cell) => cell.mine || cell.revealed)) finishWin(seconds);
     else playSfx("reveal");
-  }, [breakfastGoal, cells, config, finishWin, generated, isPaused, playSfx, seconds, status]);
+  }, [breakfastGoal, cells, config, finishWin, generated, isPaused, playSfx, saveUndoSnapshot, seconds, status, tutorialStep]);
 
   const toggleFlag = useCallback((index: number) => {
     if (status === "won" || status === "lost" || isPaused || cells[index].revealed) return;
+    if (tutorialStep !== null && (tutorialStep !== 2 || index !== tutorialFlagTarget)) return;
     if (!cells[index].flagged && flagsUsed >= config.mines) {
       setMessage("小顾贴纸已经用完啦。再检查一下标记的位置吧！");
       return;
     }
+    saveUndoSnapshot();
     setCells((current) => current.map((cell, cellIndex) =>
       cellIndex === index ? { ...cell, flagged: !cell.flagged } : cell,
     ));
     setMessage(cells[index].flagged ? "收回一张小顾贴纸。" : "小顾贴纸：这里可能有烤焦面包！" );
     playSfx("flag");
     vibrate(22);
-  }, [cells, config.mines, flagsUsed, isPaused, playSfx, status]);
+  }, [cells, config.mines, flagsUsed, isPaused, playSfx, saveUndoSnapshot, status, tutorialFlagTarget, tutorialStep]);
 
   const handleCellClick = (index: number) => {
     if (hintCell !== null || isPaused) return;
-    if (Date.now() < suppressClickUntil.current) return;
-    if (flagMode) toggleFlag(index);
-    else reveal(index);
-  };
-
-  const beginLongPress = (index: number) => {
-    if (hintCell !== null || isPaused) return;
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    longPressTimer.current = setTimeout(() => {
+    if (tutorialStep !== null && tutorialStep !== 1 && tutorialStep !== 2) return;
+    if (tutorialStep === 1 && index !== TUTORIAL_REVEAL_TARGET) return;
+    if (tutorialStep === 2 && index !== tutorialFlagTarget) return;
+    if (pendingTap.current?.index === index) {
+      clearTimeout(pendingTap.current.timer);
+      pendingTap.current = null;
       toggleFlag(index);
-      suppressClickUntil.current = Date.now() + 360;
-    }, 320);
-  };
-
-  const cancelLongPress = () => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    longPressTimer.current = null;
+      return;
+    }
+    if (pendingTap.current) {
+      clearTimeout(pendingTap.current.timer);
+      reveal(pendingTap.current.index);
+    }
+    const timer = setTimeout(() => {
+      pendingTap.current = null;
+      reveal(index);
+    }, 250);
+    pendingTap.current = { index, timer };
   };
 
   const closeHelp = () => {
@@ -281,8 +359,22 @@ export default function Home() {
     setShowHelp(false);
   };
 
+  const startTutorial = () => {
+    restart("cozy");
+    setShowHelp(false);
+    setTutorialStep(1);
+  };
+
+  const finishTutorial = () => {
+    window.localStorage.setItem("bakery-tutorial-complete", "1");
+    window.localStorage.setItem("bakery-guide-seen", "1");
+    setTutorialStep(null);
+    restart("cozy");
+  };
+
   const useScan = () => {
     if (scanUsed || isPaused) return;
+    if (tutorialStep !== null && tutorialStep !== 4) return;
     playSfx("help");
     if (!generated) {
       setMessage("339：先翻开一格，我才能校准安全扫描。");
@@ -311,7 +403,7 @@ export default function Home() {
       : message;
 
   return (
-    <main className="game-shell" onPointerDown={unlockAudio}>
+    <main className={`game-shell ${!tutorialChecked || tutorialStep !== null ? "tutorial-active" : ""}`} onPointerDown={unlockAudio}>
       <img className="floating-food floating-croissant" src={`${ASSET_ROOT}/croissant.png`} alt="" aria-hidden="true" />
       <img className="floating-food floating-bread" src={`${ASSET_ROOT}/bread.png`} alt="" aria-hidden="true" />
 
@@ -402,15 +494,11 @@ export default function Home() {
             return (
               <button
                 key={index}
-                className={`cell ${cell.revealed ? "revealed" : ""} ${cell.mine && cell.revealed ? "mine" : ""} ${cell.flagged ? "flagged" : ""} ${hintCell === index ? "hint" : ""} number-${cell.nearby}`}
+                className={`cell ${cell.revealed ? "revealed" : ""} ${cell.mine && cell.revealed ? "mine" : ""} ${cell.flagged ? "flagged" : ""} ${hintCell === index ? "hint" : ""} ${(tutorialStep === 1 && index === TUTORIAL_REVEAL_TARGET) || (tutorialStep === 2 && index === tutorialFlagTarget) ? "tutorial-target" : ""} number-${cell.nearby}`}
                 role="gridcell"
-                aria-label={`第 ${Math.floor(index / config.cols) + 1} 行，第 ${index % config.cols + 1} 列${cell.flagged ? "，已贴小顾标记" : cell.revealed ? "，已翻开" : "，未翻开"}`}
+                aria-label={`第 ${Math.floor(index / config.cols) + 1} 行，第 ${index % config.cols + 1} 列${cell.flagged ? "，已贴小顾标记" : cell.revealed ? "，已翻开" : "，未翻开"}；单击翻格，双击标记`}
                 onClick={() => handleCellClick(index)}
                 onContextMenu={(event) => { event.preventDefault(); toggleFlag(index); }}
-                onPointerDown={() => beginLongPress(index)}
-                onPointerUp={cancelLongPress}
-                onPointerCancel={cancelLongPress}
-                onPointerLeave={cancelLongPress}
               >
                 {content}
               </button>
@@ -419,10 +507,10 @@ export default function Home() {
         </div>
 
         <div className="tool-row">
-          <button className={`tool-button pressable ${flagMode ? "active" : ""}`} onClick={() => { playSfx("click"); setFlagMode((value) => !value); }} aria-pressed={flagMode}>
-            <span className="tool-icon"><img className="flag-mode-avatar" src={`${ASSET_ROOT}/xiaogu.png`} alt="" /></span><span><b>{flagMode ? "小顾标记" : "轻点翻格"}</b><small>{flagMode ? `${flagsUsed}/${config.mines} 张贴纸` : "点按切换模式"}</small></span>
+          <button className={`tool-button undo-button pressable ${tutorialStep === 3 ? "tutorial-target" : ""}`} onClick={undoLastStep} disabled={!undoSnapshot || hintCell !== null || (tutorialStep !== null && tutorialStep !== 3)}>
+            <span className="tool-icon undo-icon">↶</span><span><b>撤销一步</b><small>{undoSnapshot ? "仅恢复最近操作" : "暂无可撤销操作"}</small></span>
           </button>
-          <button className="tool-button scan-button pressable" onClick={useScan} disabled={scanUsed}>
+          <button className={`tool-button scan-button pressable ${tutorialStep === 4 ? "tutorial-target" : ""}`} onClick={useScan} disabled={scanUsed || (tutorialStep !== null && tutorialStep !== 4)}>
             <img src={`${ASSET_ROOT}/339.png`} alt="" /><span><b>{scanUsed ? "扫描已用" : "339 扫描"}</b><small>{scanUsed ? "下局充能" : "安全翻 1 格"}</small></span>
           </button>
         </div>
@@ -442,13 +530,37 @@ export default function Home() {
               </div>
             )}
             <div><strong>{status === "won" ? "早餐约会达成！" : "这炉烤过头啦"}</strong><p>{status === "won" ? `用时 ${seconds} 秒，完成扫雷并收集了全部 ${breakfastGoal} 份早餐。` : "别担心，第一格永远安全，再试一次吧。"}</p></div>
-            <button className="result-button pressable" onClick={() => restart()}>{status === "won" ? "再送一份" : "重新烘焙"}</button>
+            <div className="result-actions">
+              {undoSnapshot && <button className="result-button secondary pressable" onClick={undoLastStep}>撤销上一步</button>}
+              <button className="result-button pressable" onClick={() => restart()}>{status === "won" ? "再送一份" : "重新烘焙"}</button>
+            </div>
           </div>
         )}
         {status === "won" && <div className="confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, i) => <i key={i} />)}</div>}
       </section>
 
       <footer><span>DESIGNED FOR 小顾 × 小温</span><span>GUARDED BY 339</span></footer>
+
+      {(!tutorialChecked || tutorialStep !== null) && <div className="tutorial-shield" aria-hidden="true" />}
+      {tutorialStep !== null && (
+          <section className={`tutorial-coach ${tutorialStep === 0 || tutorialStep === 5 ? "centered" : ""} ${tutorialStep === 3 || tutorialStep === 4 ? "upper" : ""}`} role="dialog" aria-modal="true" aria-live="polite">
+            <div className="tutorial-head">
+              <img src={`${ASSET_ROOT}/339.png`} alt="339 机器人" />
+              <span>339 新手训练</span>
+              <b>{tutorialStep === 5 ? "4/4" : `${Math.max(0, tutorialStep)}/4`}</b>
+            </div>
+            {tutorialStep === 0 && (
+              <><h2>第一次来烘焙地图吗？</h2><p>接下来只能操作高亮区域。跟着 339 完成 4 步实战，就能正式开始扫雷。</p><button className="tutorial-button pressable" onClick={startTutorial}>开始 4 步教学</button></>
+            )}
+            {tutorialStep === 1 && <><h2>① 单击高亮格</h2><p>轻点一次，翻开这格。第一格一定安全。</p><span className="tutorial-wait">等待你完成单击…</span></>}
+            {tutorialStep === 2 && <><h2>② 双击贴小顾</h2><p>快速轻点高亮格两次，把它标记成可能有危险的位置。</p><span className="tutorial-wait">等待你完成双击…</span></>}
+            {tutorialStep === 3 && <><h2>③ 撤销刚才的标记</h2><p>点击高亮的“撤销一步”，恢复最近一次操作。</p><span className="tutorial-wait">等待你点击撤销…</span></>}
+            {tutorialStep === 4 && <><h2>④ 请 339 帮忙</h2><p>点击高亮的“339 扫描”，机器人会替你找出一格安全区。</p><span className="tutorial-wait">等待扫描完成…</span></>}
+            {tutorialStep === 5 && (
+              <><h2>训练完成！</h2><p>你已经学会单击翻格、双击标记、撤销一步和 339 扫描。现在重置棋盘，开始正式寻宝。</p><button className="tutorial-button pressable" onClick={finishTutorial}>进入正式游戏</button></>
+            )}
+          </section>
+      )}
 
       {isPaused && (
         <div className="pause-backdrop">
@@ -473,9 +585,10 @@ export default function Home() {
             <h2 id="help-title">30 秒学会心动扫雷</h2>
             <p className="guide-intro">目标很简单：帮小顾安全地找齐小温喜欢的早餐。</p>
             <ol>
-              <li><b>先轻点一格</b>：格子会翻开，而且开局第一格一定安全。</li>
+              <li><b>单击一格</b>：格子会翻开，而且开局第一格一定安全。</li>
               <li><b>看懂数字</b>：数字是它周围 8 格中“烤焦面包”的数量。</li>
-              <li><b>怀疑有危险就长按</b>：约 0.3 秒贴上小顾；再次长按可以收回。</li>
+              <li><b>双击贴小顾</b>：怀疑有危险就快速点两次；再次双击可以收回标记。</li>
+              <li><b>点错可以撤销</b>：棋盘下方的按钮只能恢复最近一次翻格或标记。</li>
               <li><b>怎样算赢</b>：早餐目标会随机（简单 3–5、中等 5–8、复杂 8–12），最后一份只在扫雷完成时获得。</li>
             </ol>
             <button className="primary-button pressable" onClick={closeHelp}>明白，开始找牛角包</button>
