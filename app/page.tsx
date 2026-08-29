@@ -53,7 +53,12 @@ export default function Home() {
 
 function BakeryApp() {
   const [mode, setMode] = useState<BakeryMode>("menu");
-  const { unlockAudio } = useGameAudio(false);
+  const { musicEnabled, preloadAudio, setMusicEnabled, unlockAudio } = useGameAudio(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(preloadAudio, 0);
+    return () => window.clearTimeout(timer);
+  }, [preloadAudio]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -81,6 +86,7 @@ function BakeryApp() {
       <header className="mode-menu-brand">
         <img src={`${ASSET_ROOT}/339.webp`} alt="339 机器人" decoding="async" fetchPriority="high" />
         <div><span>339&apos;S BAKERY</span><h1>今天玩哪一种？</h1></div>
+        <button className={`mode-menu-audio pressable ${musicEnabled ? "playing" : ""}`} onClick={() => { unlockAudio(); setMusicEnabled((value) => !value); }} aria-label={musicEnabled ? "关闭首页音乐" : "打开首页音乐"}>{musicEnabled ? "♫" : "♪"}</button>
       </header>
       <figure className="mode-menu-hero">
         <img src={`${ASSET_ROOT}/success-bakery.webp`} alt="小顾、小温和339在烘焙屋准备牛角包" decoding="async" fetchPriority="high" />
@@ -93,13 +99,18 @@ function BakeryApp() {
           <strong>开始 ›</strong>
         </button>
         <button className="mode-choice platter-choice pressable" onClick={() => setMode("platter")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.webp`} alt="" decoding="async" /><i>12</i></span>
-          <span className="mode-choice-copy"><small>全新推理</small><b>牛角包摆盘</b><em>颜色、行列与距离，12 关逐步变难</em></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.webp`} alt="" decoding="async" /><i>36</i></span>
+          <span className="mode-choice-copy"><small>全新推理</small><b>牛角包摆盘</b><em>颜色、行列与假设法，36 关挑战到 15×15</em></span>
           <strong>挑战 ›</strong>
         </button>
       </section>
+      <div className="mode-menu-coming" aria-label="更多游戏即将上线">
+        <span>MORE GAMES</span>
+        <b>更多烘焙小游戏</b>
+        <small>COMING SOON · 敬请期待</small>
+      </div>
       <div className="mode-menu-cast mode-menu-cast-copy" aria-hidden="true"><span>小顾 ♡ 小温</span></div>
-      <p className="mode-menu-note">进度只保存在当前设备 · 随时可以返回切换</p>
+      <p className="mode-menu-note">每位玩家进度独立 · 仅保存在自己的当前设备</p>
     </main>
   );
 }
@@ -421,7 +432,7 @@ function MinesweeperMode({ onBack }: { onBack: () => void }) {
     const timer = setTimeout(() => {
       pendingTap.current = null;
       reveal(index);
-    }, 250);
+    }, 175);
     pendingTap.current = { index, timer };
   };
 

@@ -5,7 +5,7 @@ import { extname, join, relative, resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const dist = join(root, "dist-minitool");
 const outputs = join(root, "outputs");
-const artifact = join(outputs, "339心动烘焙小工具-v1.4.2.zip");
+const artifact = join(outputs, "小红书上传用-339心动烘焙-v1.8.0.zip");
 const reportPath = join(outputs, "小红书小工具-校验摘要.txt");
 
 const optionalFiles = [
@@ -155,7 +155,9 @@ const report = [
   "文件类型：仅包含 html / css / js / webp，未包含 mp3 或其他白名单外扩展名",
   "端能力：未发现网络请求、Worker、定位、剪贴板、新窗口、iframe 等禁用能力",
   "跨端：Pointer Events、viewport-fit=cover、容器/真机双安全区变量",
-  "声音：首次用户轻点后按需加载 Web Audio；支持分别关闭 BGM/音效及关闭循环",
+  "声音：首页预载音乐，首次轻点立即播放；支持分别关闭 BGM/音效及关闭循环",
+  "摆盘：36 关，后期取消预放，最大 15×15；包含颜色/行列无解检测与假设法反证提示",
+  "双击：识别窗口放宽至 480ms；排除操作不触发中途警告，确认摆放后才检查无解",
   `产物：${artifact}`,
   "",
 ].join("\n");

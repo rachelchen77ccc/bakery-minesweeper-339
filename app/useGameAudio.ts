@@ -326,6 +326,10 @@ function useGameAudioController(gamePaused = false) {
     warmSfx();
   }, [ensureWebAudioContext, startEmbeddedBgm, warmSfx]);
 
+  const preloadAudio = useCallback(() => {
+    if (embeddedAudioBundlePath()) void loadEmbeddedAudioData().catch(() => undefined);
+  }, []);
+
   const playSfx = useCallback((name: SfxName) => {
     if (!sfxEnabledRef.current) return;
     const mix = SFX_MIX[name];
@@ -370,6 +374,7 @@ function useGameAudioController(gamePaused = false) {
     musicLoop,
     musicVolume,
     playSfx,
+    preloadAudio,
     setMusicEnabled,
     setMusicLoop,
     setMusicVolume,
