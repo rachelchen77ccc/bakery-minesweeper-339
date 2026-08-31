@@ -10,6 +10,15 @@ export const MATCH_ICON_FILES = [
 
 export const MATCH_ICON_LABELS = ["牛角包", "面包", "小顾", "小温", "339"] as const;
 
+// 小顾、小温消除得分相等，且比其他材料高——呼应"双人协作"两人并肩的设定。
+export const ICON_SCORE_VALUE: Record<MatchIconId, number> = {
+  0: 10, // 牛角包
+  1: 10, // 面包
+  2: 15, // 小顾
+  3: 15, // 小温
+  4: 10, // 339
+};
+
 export type GoalRule =
   | { type: "collect"; icon: MatchIconId; amount: number }
   | { type: "clearObstacles" }
@@ -34,6 +43,7 @@ export type MatchLevelRule = {
   displayNumber: number;
   tier: string;
   tierIndex: number;
+  difficulty: MatchDifficulty;
   width: number;
   height: number;
   shapeId: ShapeId;
@@ -44,6 +54,43 @@ export type MatchLevelRule = {
 };
 
 export const MATCH_LEVEL_COUNT = 339;
+
+export type MatchDifficulty = "easy" | "normal" | "hard";
+
+export const MATCH_DIFFICULTIES: { id: MatchDifficulty; label: string }[] = [
+  { id: "easy", label: "简单" },
+  { id: "normal", label: "中等" },
+  { id: "hard", label: "高级" },
+];
+
+// hard = 上线时的原始数值（保留给想要挑战的玩家）；normal/easy 在此基础上
+// 放宽步数、减少障碍、降低目标数值，三个维度各自独立生效。maxGoals 控制同一关
+// 最多要求同时达成几个目标——hard 保留原有的多目标组合，easy/normal 结构性地
+// 减少"必须同时达成两三件事"这种难点，而不只是把数值调低。
+const DIFFICULTY_ADJUST: Record<MatchDifficulty, { moveMul: number; obstacleMul: number; goalMul: number; maxGoals: number }> = {
+  easy: { moveMul: 1.55, obstacleMul: 0.45, goalMul: 0.7, maxGoals: 1 },
+  normal: { moveMul: 1.25, obstacleMul: 0.7, goalMul: 0.85, maxGoals: 2 },
+  hard: { moveMul: 1, obstacleMul: 1, goalMul: 1, maxGoals: 3 },
+};
+
+// 目标裁剪优先级：清障碍格 > 收集 > 分数——障碍格已经生成在棋盘上了，砍掉这个
+// 目标会让玩家看着障碍格却没有对应目标，体感最奇怪，所以最后才砍它；分数目标
+// 相对最抽象，maxGoals 收紧时优先砍它。
+function goalPriority(goal: GoalRule) {
+  if (goal.type === "clearObstacles") return 0;
+  if (goal.type === "collect") return 1;
+  return 2;
+}
+
+function capGoals(goals: GoalRule[], maxGoals: number): GoalRule[] {
+  if (goals.length <= maxGoals) return goals;
+  return goals
+    .map((goal, order) => ({ goal, order }))
+    .sort((a, b) => goalPriority(a.goal) - goalPriority(b.goal) || a.order - b.order)
+    .slice(0, maxGoals)
+    .sort((a, b) => a.order - b.order)
+    .map((entry) => entry.goal);
+}
 
 function hash(index: number, salt: number) {
   const x = Math.sin(index * 12.9898 + salt * 78.233 + 1.7) * 43758.5453;
@@ -186,7 +233,7 @@ const TIERS: TierConfig[] = [
     shapes: ["rect", "diamond", "plus", "ring"],
     sizeAt: () => ({ width: 9, height: 9 }),
     tileTypesAt: () => 4,
-    moveLimitRange: [17, 14],
+    moveLimitRange: [26, 20],
     lightRange: [0, 5],
     heavyRange: [0, 0],
     goalRecipes: ["collect1"],
@@ -204,7 +251,7 @@ const TIERS: TierConfig[] = [
     shapes: ["heart", "xcross", "bowtie", "hourglass", "diamond"],
     sizeAt: (pos) => (pos < 25 ? { width: 9, height: 9 } : { width: 10, height: 9 }),
     tileTypesAt: (pos) => (pos < 25 ? 4 : 5),
-    moveLimitRange: [15, 13],
+    moveLimitRange: [22, 17],
     lightRange: [4, 10],
     heavyRange: [0, 0],
     goalRecipes: ["collect2", "collect1score"],
@@ -222,7 +269,7 @@ const TIERS: TierConfig[] = [
     shapes: ["ring", "star", "doubleHeart", "plus", "diamond", "xcross"],
     sizeAt: () => ({ width: 10, height: 10 }),
     tileTypesAt: () => 5,
-    moveLimitRange: [14, 12],
+    moveLimitRange: [19, 15],
     lightRange: [6, 10],
     heavyRange: [2, 6],
     goalRecipes: ["clearObstacles", "collect1clear"],
@@ -240,7 +287,7 @@ const TIERS: TierConfig[] = [
     shapes: ["heart", "hourglass", "staircase", "bowtie", "star"],
     sizeAt: (pos) => (pos < 35 ? { width: 10, height: 10 } : { width: 11, height: 10 }),
     tileTypesAt: () => 5,
-    moveLimitRange: [13, 11],
+    moveLimitRange: [16, 13],
     lightRange: [4, 8],
     heavyRange: [6, 12],
     goalRecipes: ["score", "collect1clear"],
@@ -258,7 +305,7 @@ const TIERS: TierConfig[] = [
     shapes: ["heart", "doubleHeart", "ring", "star", "xcross", "staircase", "diamond"],
     sizeAt: () => ({ width: 11, height: 11 }),
     tileTypesAt: () => 5,
-    moveLimitRange: [12, 10],
+    moveLimitRange: [14, 11],
     lightRange: [8, 14],
     heavyRange: [8, 14],
     goalRecipes: ["collect1clear", "collect1score", "clearScore"],
@@ -276,7 +323,7 @@ const TIERS: TierConfig[] = [
     shapes: ["heart", "doubleHeart", "star", "ring", "xcross"],
     sizeAt: () => ({ width: 11, height: 11 }),
     tileTypesAt: () => 5,
-    moveLimitRange: [11, 9],
+    moveLimitRange: [12, 9],
     lightRange: [10, 16],
     heavyRange: [10, 18],
     goalRecipes: ["collect1clear", "clearScore", "finaleTriple"],
@@ -289,15 +336,15 @@ const TIERS: TierConfig[] = [
   },
 ];
 
-function goalsForRecipe(recipe: GoalRecipe, index: number, tileTypes: number, moveLimit: number): GoalRule[] {
+function goalsForRecipe(recipe: GoalRecipe, index: number, tileTypes: number, moveLimit: number, goalMul: number = 1): GoalRule[] {
   const iconA = Math.floor(hash(index, 11) * tileTypes) as MatchIconId;
   let iconB = Math.floor(hash(index, 23) * tileTypes) as MatchIconId;
   if (iconB === iconA) iconB = ((iconB + 1) % tileTypes) as MatchIconId;
-  const collectFactor = 2.3 + hash(index, 31) * 0.9;
-  const scoreFactor = 110 + hash(index, 41) * 70;
-  const singleAmount = round(moveLimit * collectFactor);
-  const splitAmount = round(moveLimit * collectFactor * 0.62);
-  const scoreAmount = round((moveLimit * scoreFactor) / 10) * 10;
+  const collectFactor = 1.6 + hash(index, 31) * 0.7;
+  const scoreFactor = 80 + hash(index, 41) * 55;
+  const singleAmount = Math.max(3, round(moveLimit * collectFactor * goalMul));
+  const splitAmount = Math.max(2, round(moveLimit * collectFactor * 0.62 * goalMul));
+  const scoreAmount = Math.max(20, round((moveLimit * scoreFactor * goalMul) / 10) * 10);
 
   switch (recipe) {
     case "collect1":
@@ -334,30 +381,41 @@ function goalsForRecipe(recipe: GoalRecipe, index: number, tileTypes: number, mo
   }
 }
 
-export function getMatchLevelRule(index: number): MatchLevelRule {
+export function tierIndexForLevel(index: number): number {
   const clamped = Math.min(MATCH_LEVEL_COUNT - 1, Math.max(0, index));
   const tierIndex = TIERS.findIndex((tier) => clamped < tier.start + tier.count);
-  const tier = TIERS[tierIndex === -1 ? TIERS.length - 1 : tierIndex];
+  return tierIndex === -1 ? TIERS.length - 1 : tierIndex;
+}
+
+export function getMatchLevelRule(index: number, difficulty: MatchDifficulty = "normal"): MatchLevelRule {
+  const clamped = Math.min(MATCH_LEVEL_COUNT - 1, Math.max(0, index));
+  const tierIndex = tierIndexForLevel(clamped);
+  const tier = TIERS[tierIndex];
   const pos = clamped - tier.start;
   const t = tier.count <= 1 ? 0 : pos / (tier.count - 1);
+  const adjust = DIFFICULTY_ADJUST[difficulty];
 
   const isFinaleLevel = clamped === MATCH_LEVEL_COUNT - 1;
   const size = isFinaleLevel ? FINALE_339_SIZE : tier.sizeAt(pos, tier.count);
   const shapeId: ShapeId = isFinaleLevel ? "finale339" : pick(clamped, 3, tier.shapes);
   const tileTypes = tier.tileTypesAt(pos, tier.count);
-  const moveLimit = isFinaleLevel
+  const baseMoveLimit = isFinaleLevel
     ? tier.moveLimitRange[1]
     : round(lerp(t, tier.moveLimitRange[0], tier.moveLimitRange[1]));
-  const light = round(lerp(t, tier.lightRange[0], tier.lightRange[1]));
-  const heavy = round(lerp(t, tier.heavyRange[0], tier.heavyRange[1]));
+  const moveLimit = Math.max(6, round(baseMoveLimit * adjust.moveMul));
+  const baseLight = round(lerp(t, tier.lightRange[0], tier.lightRange[1]));
+  const baseHeavy = round(lerp(t, tier.heavyRange[0], tier.heavyRange[1]));
+  const light = round(baseLight * adjust.obstacleMul);
+  const heavy = round(baseHeavy * adjust.obstacleMul);
   const recipe: GoalRecipe = isFinaleLevel ? "finaleTriple" : pick(clamped, 51, tier.goalRecipes);
-  const goals = goalsForRecipe(recipe, clamped, tileTypes, moveLimit);
+  const goals = capGoals(goalsForRecipe(recipe, clamped, tileTypes, baseMoveLimit, adjust.goalMul), adjust.maxGoals);
 
   return {
     index: clamped,
     displayNumber: clamped + 1,
     tier: tier.name,
-    tierIndex: tierIndex === -1 ? TIERS.length - 1 : tierIndex,
+    tierIndex,
+    difficulty,
     width: size.width,
     height: size.height,
     shapeId,
@@ -369,7 +427,7 @@ export function getMatchLevelRule(index: number): MatchLevelRule {
 }
 
 export function captionForLevel(index: number) {
-  const tier = TIERS[getMatchLevelRule(index).tierIndex];
+  const tier = TIERS[tierIndexForLevel(index)];
   return pick(index, 61, tier.captions);
 }
 
@@ -388,9 +446,8 @@ export type MatchBoard = {
   width: number;
   height: number;
   cells: MatchCell[];
-  /** Which of the 5 icons are in play for this board's lifetime — chosen as a
-   * random subset so low-tileTypes levels don't systematically exclude
-   * high-index icons (like 339) from ever appearing. */
+  /** Which icons are in play for this board — always all 5 (牛角包/面包/
+   * 小顾/小温/339), so every icon can appear on every level's board. */
   iconPool: MatchIconId[];
 };
 
@@ -479,23 +536,17 @@ export function emptyMatchBoard(rule: MatchLevelRule): MatchBoard {
 }
 
 export function generateMatchBoard(rule: MatchLevelRule): MatchBoard {
-  const { width, height, tileTypes } = rule;
+  const { width, height } = rule;
   const mask = buildShapeMask(rule.shapeId, width, height);
   const activeIndexes = Array.from(mask.values());
   const maxObstacles = Math.floor(activeIndexes.length * 0.35);
   const targetHeavy = Math.min(rule.obstacle.heavy, maxObstacles);
   const targetLight = Math.min(rule.obstacle.light, Math.max(0, maxObstacles - targetHeavy));
 
-  // Pick a random subset of `tileTypes` icons out of all 5 (instead of always
-  // the first N by index) so every icon — including 339 — gets a fair chance
-  // to show up even on levels that only use 3 or 4 tile types. Any icon a
-  // collect goal actually needs is force-included, or the goal could target
-  // an icon that never appears on this particular board at all.
-  const requiredIcons = Array.from(new Set(
-    rule.goals.filter((goal): goal is { type: "collect"; icon: MatchIconId; amount: number } => goal.type === "collect").map((goal) => goal.icon),
-  ));
-  const otherIcons = ([0, 1, 2, 3, 4] as MatchIconId[]).filter((icon) => !requiredIcons.includes(icon)).sort(() => Math.random() - 0.5);
-  const iconPool = [...requiredIcons, ...otherIcons].slice(0, Math.max(tileTypes, requiredIcons.length));
+  // All 5 icons are always in play — 牛角包/面包/小顾/小温/339 must every one
+  // be able to show up on every board, not just whichever subset a level's
+  // difficulty tier used to narrow things down to.
+  const iconPool: MatchIconId[] = [0, 1, 2, 3, 4];
   const randomIcon = () => iconPool[Math.floor(Math.random() * iconPool.length)];
 
   for (let attempt = 0; attempt < 40; attempt += 1) {

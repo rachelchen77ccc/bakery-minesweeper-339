@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  MATCH_DIFFICULTIES,
   MATCH_ICON_FILES,
   MATCH_ICON_LABELS,
   MATCH_LEVEL_COUNT,
@@ -11,19 +12,21 @@ import {
   generateMatchBoard,
   hasAnyValidMove,
   neighborsOf,
+  tierIndexForLevel,
   tierList,
   type GoalRule,
   type MatchBoard,
+  type MatchDifficulty,
   type MatchIconId,
   type MatchLevelRule,
 } from "./matchLevels";
 import {
   allGoalsDone,
   countInitialObstacles,
-  detonateSeed,
-  findBestHintSwap,
+  detonateArea,
   goalStatus,
   peekSwap,
+  powerShuffleBoard,
   resolveStep,
   shuffleBoard,
   type MatchProgress,
@@ -33,21 +36,44 @@ import { useGameAudio } from "./useGameAudio";
 const ASSET_ROOT = "assets";
 const asset = (name: string) => `${ASSET_ROOT}/${name}.webp`;
 
-const UNLOCKED_KEY = "bakery-match-unlocked";
+const LEGACY_UNLOCKED_KEY = "bakery-match-unlocked";
+const UNLOCKED_KEY_BY_DIFFICULTY: Record<MatchDifficulty, string> = {
+  easy: "bakery-match-unlocked-easy",
+  normal: "bakery-match-unlocked-normal",
+  hard: "bakery-match-unlocked-hard",
+};
+const TIER_DIFFICULTY_KEY = "bakery-match-tier-difficulty";
 const LAST_LEVEL_KEY = "bakery-match-last-level";
 const TUTORIAL_KEY = "bakery-match-tutorial-v1-complete";
+const TIER_COUNT = tierList().length;
+const DEFAULT_TIER_DIFFICULTY: MatchDifficulty[] = Array.from({ length: TIER_COUNT }, () => "normal");
+
+function isMatchDifficulty(value: unknown): value is MatchDifficulty {
+  return MATCH_DIFFICULTIES.some((entry) => entry.id === value);
+}
+
+const STAGE_INTRO: { name: string; text: string }[] = [
+  { name: "甜蜜启程", text: "小顾：欢迎来到甜蜜启程，跟着节奏慢慢来，我们会一直陪着你。" },
+  { name: "双人协作", text: "小温：接下来是双人协作，小顾和小温消除的时候得分是一样多的，而且比牛角包、面包、339 都高——两个人的分量，谁都不比谁轻。" },
+  { name: "五味俱全", text: "339：五味俱全阶段，五种口味全部登场，棋盘也会更花，看清楚再交换。" },
+  { name: "层层用心", text: "小顾：层层用心开始了，奶油冻变多了，得多留意哪里该优先清理。" },
+  { name: "烘焙大师", text: "小温：烘焙大师阶段，两个目标常常要一起追，节奏要抓得比之前更紧。" },
+  { name: "终极告白", text: "339：终极告白，这是最后一段路，339 会陪着你们走到第 339 关。" },
+];
 
 type MatchStatus = "playing" | "won" | "failed";
 type MatchTutorialStep = 0 | 1 | 2 | 3 | null;
-type ToolCounts = { reshuffle: number; hint: number; bomb: number };
+type ToolCounts = { reshuffle: number; bomb: number; extend: number };
+const EXTEND_MOVES_AMOUNT = 5;
+const BOMB_RADIUS = 1;
 
 const TOOL_BUDGET_BY_TIER: ToolCounts[] = [
-  { reshuffle: 2, hint: 3, bomb: 2 },
-  { reshuffle: 2, hint: 3, bomb: 2 },
-  { reshuffle: 1, hint: 2, bomb: 1 },
-  { reshuffle: 1, hint: 2, bomb: 1 },
-  { reshuffle: 1, hint: 1, bomb: 1 },
-  { reshuffle: 0, hint: 1, bomb: 1 },
+  { reshuffle: 2, bomb: 3, extend: 2 },
+  { reshuffle: 2, bomb: 3, extend: 2 },
+  { reshuffle: 1, bomb: 2, extend: 1 },
+  { reshuffle: 1, bomb: 2, extend: 1 },
+  { reshuffle: 1, bomb: 1, extend: 1 },
+  { reshuffle: 0, bomb: 1, extend: 1 },
 ];
 
 function toolBudgetFor(rule: MatchLevelRule) {
@@ -118,15 +144,20 @@ function goalLabel(goal: GoalRule) {
 
 export function MatchGame({ onBack }: { onBack: () => void }) {
   const [levelIndex, setLevelIndex] = useState(0);
-  const rule = useMemo(() => getMatchLevelRule(levelIndex), [levelIndex]);
+  const [tierDifficulty, setTierDifficulty] = useState<MatchDifficulty[]>(DEFAULT_TIER_DIFFICULTY);
+  const [unlockedByDifficulty, setUnlockedByDifficulty] = useState<Record<MatchDifficulty, number>>({ easy: 1, normal: 1, hard: 1 });
+  const rule = useMemo(
+    () => getMatchLevelRule(levelIndex, tierDifficulty[tierIndexForLevel(levelIndex)] ?? "normal"),
+    [levelIndex, tierDifficulty],
+  );
   const [board, setBoard] = useState<MatchBoard>(() => emptyMatchBoard(getMatchLevelRule(0)));
   const [progress, setProgress] = useState<MatchProgress>(() => emptyProgress(0));
   const [movesUsed, setMovesUsed] = useState(0);
+  const [bonusMoves, setBonusMoves] = useState(0);
   const [status, setStatus] = useState<MatchStatus>("playing");
   const [selected, setSelected] = useState<number | null>(null);
   const [toolsLeft, setToolsLeft] = useState<ToolCounts>(() => toolBudgetFor(getMatchLevelRule(0)));
   const [bombArmed, setBombArmed] = useState(false);
-  const [hintPair, setHintPair] = useState<[number, number] | null>(null);
   const [shaking, setShaking] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [boardLoaded, setBoardLoaded] = useState(false);
@@ -138,40 +169,82 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
   const [message, setMessage] = useState("小顾：一起把棋盘收拾整齐吧，先点一个格子看看。");
   const [showHelp, setShowHelp] = useState(false);
   const [showLevelPicker, setShowLevelPicker] = useState(false);
-  const [unlockedLevel, setUnlockedLevel] = useState(1);
   const [tutorialStep, setTutorialStep] = useState<MatchTutorialStep>(null);
   const [tutorialReady, setTutorialReady] = useState(false);
-  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [stageIntroTier, setStageIntroTier] = useState<number | null>(null);
   const shakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTierRef = useRef<number | null>(null);
   const { musicEnabled, playSfx, setMusicEnabled, setSfxEnabled, sfxEnabled, unlockAudio } = useGameAudio(false);
 
-  const loadLevel = useCallback((index: number) => {
-    const nextRule = getMatchLevelRule(index);
+  const loadLevel = useCallback((index: number, tierDifficultyOverride?: MatchDifficulty[]) => {
+    const difficultyTable = tierDifficultyOverride ?? tierDifficulty;
+    const nextTierIndex = tierIndexForLevel(index);
+    const difficulty = difficultyTable[nextTierIndex] ?? "normal";
+    const nextRule = getMatchLevelRule(index, difficulty);
     const nextBoard = generateMatchBoard(nextRule);
     setLevelIndex(index);
     setBoard(nextBoard);
     setProgress(emptyProgress(countInitialObstacles(nextBoard)));
     setMovesUsed(0);
+    setBonusMoves(0);
     setStatus("playing");
     setSelected(null);
     setBombArmed(false);
-    setHintPair(null);
     setToolsLeft(toolBudgetFor(nextRule));
     setMessage(captionForLevel(index));
     setBoardLoaded(true);
     window.localStorage.setItem(LAST_LEVEL_KEY, String(index));
-  }, []);
+    if (lastTierRef.current !== null && lastTierRef.current !== nextTierIndex) {
+      setStageIntroTier(nextTierIndex);
+    }
+    lastTierRef.current = nextTierIndex;
+  }, [tierDifficulty]);
+
+  const setTierDifficultyAt = (tierIndex: number, difficulty: MatchDifficulty) => {
+    setTierDifficulty((current) => {
+      if (current[tierIndex] === difficulty) return current;
+      const next = [...current];
+      next[tierIndex] = difficulty;
+      window.localStorage.setItem(TIER_DIFFICULTY_KEY, JSON.stringify(next));
+      return next;
+    });
+    playSfx("click");
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const savedUnlocked = Math.min(MATCH_LEVEL_COUNT, Math.max(1, Number(window.localStorage.getItem(UNLOCKED_KEY) || 1)));
-      setUnlockedLevel(savedUnlocked);
-      const savedLast = Math.min(savedUnlocked - 1, Math.max(0, Number(window.localStorage.getItem(LAST_LEVEL_KEY) || 0)));
+      let loadedTierDifficulty = DEFAULT_TIER_DIFFICULTY;
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(TIER_DIFFICULTY_KEY) || "null");
+        if (Array.isArray(parsed) && parsed.length === TIER_COUNT && parsed.every(isMatchDifficulty)) {
+          loadedTierDifficulty = parsed;
+        }
+      } catch {
+        loadedTierDifficulty = DEFAULT_TIER_DIFFICULTY;
+      }
+      setTierDifficulty(loadedTierDifficulty);
+
+      const legacyUnlocked = Math.max(0, Number(window.localStorage.getItem(LEGACY_UNLOCKED_KEY) || 0));
+      const nextUnlocked: Record<MatchDifficulty, number> = { easy: 1, normal: 1, hard: 1 };
+      (Object.keys(UNLOCKED_KEY_BY_DIFFICULTY) as MatchDifficulty[]).forEach((difficulty) => {
+        const raw = window.localStorage.getItem(UNLOCKED_KEY_BY_DIFFICULTY[difficulty]);
+        if (raw) {
+          nextUnlocked[difficulty] = Math.min(MATCH_LEVEL_COUNT, Math.max(1, Number(raw)));
+        } else if (difficulty === "normal" && legacyUnlocked > 0) {
+          nextUnlocked[difficulty] = Math.min(MATCH_LEVEL_COUNT, Math.max(1, legacyUnlocked));
+        }
+      });
+      setUnlockedByDifficulty(nextUnlocked);
+
+      const savedLastRaw = Math.max(0, Number(window.localStorage.getItem(LAST_LEVEL_KEY) || 0));
+      const lastDifficulty = loadedTierDifficulty[tierIndexForLevel(savedLastRaw)] ?? "normal";
+      const savedLast = Math.min(nextUnlocked[lastDifficulty] - 1, savedLastRaw);
+
       if (!window.localStorage.getItem(TUTORIAL_KEY)) {
         setTutorialStep(0);
-        loadLevel(0);
+        loadLevel(0, loadedTierDifficulty);
       } else {
-        loadLevel(savedLast);
+        loadLevel(savedLast, loadedTierDifficulty);
         setShowLevelPicker(true);
       }
       setTutorialReady(true);
@@ -181,7 +254,6 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => () => {
-    if (hintTimer.current) clearTimeout(hintTimer.current);
     if (shakeTimer.current) clearTimeout(shakeTimer.current);
   }, []);
 
@@ -271,13 +343,16 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
       setStatus("won");
       playSfx("win");
       vibrate([45, 35, 45, 35, 80]);
-      const nextUnlocked = Math.min(MATCH_LEVEL_COUNT, Math.max(unlockedLevel, levelIndex + 2));
-      setUnlockedLevel(nextUnlocked);
-      window.localStorage.setItem(UNLOCKED_KEY, String(nextUnlocked));
+      setUnlockedByDifficulty((current) => {
+        const nextForDifficulty = Math.min(MATCH_LEVEL_COUNT, Math.max(current[rule.difficulty], levelIndex + 2));
+        if (nextForDifficulty === current[rule.difficulty]) return current;
+        window.localStorage.setItem(UNLOCKED_KEY_BY_DIFFICULTY[rule.difficulty], String(nextForDifficulty));
+        return { ...current, [rule.difficulty]: nextForDifficulty };
+      });
       setMessage("339：这一盘完成了！小顾和小温都在为你鼓掌。");
       return;
     }
-    if (movesUsed >= rule.moveLimit) {
+    if (movesUsed >= rule.moveLimit + bonusMoves) {
       setStatus("failed");
       playSfx("lose");
       vibrate([100, 55, 140]);
@@ -286,7 +361,7 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
     }
     if (!hasAnyValidMove(board)) void triggerAutoReshuffle(board);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, boardLoaded, busy, movesUsed, progress, rule, status, tutorialStep]);
+  }, [board, boardLoaded, bonusMoves, busy, movesUsed, progress, rule, status, tutorialStep]);
 
   const trySwap = useCallback(async (a: number, b: number) => {
     const peek = peekSwap(board, a, b);
@@ -308,35 +383,16 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board, playSfx, runCascade]);
 
-  const handleBombTarget = useCallback(async (index: number) => {
-    setBombArmed(false);
-    setBusy(true);
-    const seed = detonateSeed(board, index);
-    setClearingCells(seed.clearedIndexes);
-    playSfx("flag");
-    vibrate([20, 20, 20]);
-    await wait(150);
-    setBoard(seed.board);
-    setClearingCells(new Set());
-    setFallingCells(seed.fallOffsets);
-    await nextFrame();
-    setFallingCells(new Map());
-    setMovesUsed((value) => value + 1);
-    setToolsLeft((current) => ({ ...current, bomb: current.bomb - 1 }));
-    setMessage("小温：轻轻一戳，这一格清干净啦。");
-    await wait(seed.fallOffsets.size > 0 ? 200 : 90);
-    await runCascade(seed.board, [], null, {
-      collectGain: seed.collectGain,
-      obstacleCleared: seed.obstacleCleared,
-      scoreGain: seed.scoreGain,
-      specialsCreated: 0,
-    });
-    setBusy(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, playSfx, rule.tileTypes, runCascade]);
+  const useExtendMovesTool = () => {
+    if (toolsLeft.extend <= 0 || status !== "playing" || tutorialStep !== null || busy) return;
+    setToolsLeft((current) => ({ ...current, extend: current.extend - 1 }));
+    setBonusMoves((value) => value + EXTEND_MOVES_AMOUNT);
+    setMessage(`小温：多给你 ${EXTEND_MOVES_AMOUNT} 步，别着急。`);
+    playSfx("help");
+    vibrate([18, 25, 18]);
+  };
 
   const selectCell = (index: number) => {
-    // eslint-disable-next-line no-console
     if (!board.cells[index].active || busy) return;
     if (tutorialStep !== null) {
       if (tutorialStep !== 1) return;
@@ -362,12 +418,8 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
       return;
     }
     if (status !== "playing") return;
-    if (hintPair) {
-      setHintPair(null);
-      if (hintTimer.current) clearTimeout(hintTimer.current);
-    }
     if (bombArmed) {
-      void handleBombTarget(index);
+      void handleGuBombTarget(index);
       return;
     }
     if (selected === null) {
@@ -395,33 +447,53 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
     vibrate([18, 25, 18]);
     setShuffleFx(true);
     await wait(180);
-    setBoard(shuffleBoard(board));
+    setBoard(powerShuffleBoard(board));
     setShuffleFx(false);
-    setMessage("339：洗牌完成，棋盘已经重新排列。");
+    setMessage("339：洗牌完成，棋盘上已经有一手大连击等你打出来。");
     setBusy(false);
   };
 
-  const useHintTool = () => {
-    if (toolsLeft.hint <= 0 || status !== "playing" || tutorialStep !== null || busy) return;
-    const pair = findBestHintSwap(board, rule.goals, progress);
-    if (!pair) {
-      setMessage("小顾：暂时没找到可行的一步，试试 339 洗牌吧。");
+  const armGuBombTool = () => {
+    if (toolsLeft.bomb <= 0 || status !== "playing" || tutorialStep !== null || busy) return;
+    if (bombArmed) {
+      setBombArmed(false);
+      setMessage("小顾：先取消了，想清楚了再点我。");
       return;
     }
-    setToolsLeft((current) => ({ ...current, hint: current.hint - 1 }));
-    setHintPair(pair);
-    setMessage("小顾：交换高亮的两格，最有助于完成目标。");
-    playSfx("help");
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-    hintTimer.current = setTimeout(() => setHintPair(null), 2600);
-  };
-
-  const armBombTool = () => {
-    if (toolsLeft.bomb <= 0 || status !== "playing" || tutorialStep !== null || busy) return;
-    setBombArmed((value) => !value);
     setSelected(null);
+    setBombArmed(true);
+    setMessage("小顾：点棋盘上任意一格，我帮你炸开周围一整片。");
     playSfx("click");
   };
+
+  const handleGuBombTarget = useCallback(async (index: number) => {
+    setBombArmed(false);
+    setBusy(true);
+    setToolsLeft((current) => ({ ...current, bomb: current.bomb - 1 }));
+    playSfx("flag");
+    vibrate([20, 20, 30]);
+    const step = detonateArea(board, index, BOMB_RADIUS);
+    setClearingCells(step.clearedIndexes);
+    await wait(150);
+    setBoard(step.board);
+    setClearingCells(new Set());
+    setFallingCells(step.fallOffsets);
+    await nextFrame();
+    setFallingCells(new Map());
+    setMovesUsed((value) => value + 1);
+    await wait(step.fallOffsets.size > 0 ? 220 : 100);
+    const settled = await runCascade(step.board, [], null, {
+      collectGain: step.collectGain,
+      obstacleCleared: step.obstacleCleared,
+      scoreGain: step.scoreGain,
+      specialsCreated: 0,
+    });
+    setMessage("小顾：炸开一片，接着看看能不能接上连击。");
+    setBusy(false);
+    return settled;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board, playSfx, runCascade]);
+
 
   const restartLevel = async () => {
     if (tutorialStep !== null || busy) return;
@@ -435,15 +507,15 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
   };
 
   const chooseLevel = (index: number) => {
-    // eslint-disable-next-line no-console
-    if (index + 1 > unlockedLevel || busy) return;
+    const difficulty = tierDifficulty[tierIndexForLevel(index)] ?? "normal";
+    if (index + 1 > unlockedByDifficulty[difficulty] || busy) return;
     loadLevel(index);
     setShowLevelPicker(false);
     playSfx("click");
   };
 
   const goalStatuses = useMemo(() => rule.goals.map((goal) => ({ goal, status: goalStatus(goal, progress) })), [progress, rule.goals]);
-  const movesLeft = Math.max(0, rule.moveLimit - movesUsed);
+  const movesLeft = Math.max(0, rule.moveLimit + bonusMoves - movesUsed);
   const allMuted = !musicEnabled && !sfxEnabled;
 
   return (
@@ -477,6 +549,7 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
           <button className="match-level-btn pressable" onClick={() => setShowLevelPicker(true)}>
             <span>第 {rule.displayNumber} 关</span><small>{rule.tier} ▾</small>
           </button>
+          <span className={`match-difficulty-badge ${rule.difficulty}`}>{MATCH_DIFFICULTIES.find((option) => option.id === rule.difficulty)?.label}</span>
           <div className="match-moves-pill"><span>步数</span><b className={movesLeft <= 3 ? "danger" : ""}>{movesLeft}</b></div>
         </div>
 
@@ -513,7 +586,7 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
         </div>
 
         <div
-          className={`match-board ${bombArmed ? "bomb-armed" : ""} ${tutorialStep === 1 ? "tutorial-board-focus" : ""} ${busy ? "busy" : ""} ${shuffleFx ? "shuffle-out" : ""}`}
+          className={`match-board ${tutorialStep === 1 ? "tutorial-board-focus" : ""} ${busy ? "busy" : ""} ${shuffleFx ? "shuffle-out" : ""} ${bombArmed ? "bomb-armed" : ""}`}
           role="grid"
           aria-label={`${rule.height} 行 ${rule.width} 列消消乐棋盘`}
           style={{ "--match-cols": board.width, "--match-rows": board.height, aspectRatio: `${board.width} / ${board.height}` } as CSSProperties}
@@ -535,7 +608,7 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
             return (
               <button
                 key={index}
-                className={`match-cell ${toneClass} ${cell.special ?? ""} ${selected === index ? "selected" : ""} ${hintPair?.includes(index) ? "hint" : ""} ${shaking.has(index) ? "shake" : ""} ${isTutorialTarget ? "tutorial-target" : ""} ${clearingCells.has(index) ? "clearing" : ""} ${sweptCells.has(index) ? "swept" : ""}`}
+                className={`match-cell ${toneClass} ${cell.special ?? ""} ${selected === index ? "selected" : ""} ${shaking.has(index) ? "shake" : ""} ${isTutorialTarget ? "tutorial-target" : ""} ${clearingCells.has(index) ? "clearing" : ""} ${sweptCells.has(index) ? "swept" : ""}`}
                 style={cellStyle}
                 role="gridcell"
                 aria-label={`${MATCH_ICON_LABELS[cell.icon ?? 0]}${cell.cover ? "，有障碍" : ""}${cell.special ? "，特殊块" : ""}`}
@@ -556,11 +629,11 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
           <button className="match-tool-btn pressable" onClick={useReshuffleTool} disabled={toolsLeft.reshuffle <= 0 || tutorialStep !== null}>
             <img src={asset("match-339")} alt="" /><span><b>339洗牌</b><small>棋盘重排</small></span><i>{toolsLeft.reshuffle}</i>
           </button>
-          <button className="match-tool-btn pressable" onClick={useHintTool} disabled={toolsLeft.hint <= 0 || tutorialStep !== null}>
-            <img src={asset("match-xiaogu")} alt="" /><span><b>小顾提示</b><small>推荐最优一步</small></span><i>{toolsLeft.hint}</i>
+          <button className={`match-tool-btn pressable ${bombArmed ? "active" : ""}`} onClick={armGuBombTool} disabled={toolsLeft.bomb <= 0 || tutorialStep !== null}>
+            <img src={asset("match-xiaogu")} alt="" /><span><b>小顾炸弹</b><small>{bombArmed ? "点棋盘选目标" : "炸开周围3×3"}</small></span><i>{toolsLeft.bomb}</i>
           </button>
-          <button className={`match-tool-btn pressable ${bombArmed ? "active" : ""}`} onClick={armBombTool} disabled={toolsLeft.bomb <= 0 || tutorialStep !== null}>
-            <img src={asset("match-xiaowen")} alt="" /><span><b>小温炸弹</b><small>{bombArmed ? "点棋盘任意格" : "清除任意一格"}</small></span><i>{toolsLeft.bomb}</i>
+          <button className="match-tool-btn pressable" onClick={useExtendMovesTool} disabled={toolsLeft.extend <= 0 || tutorialStep !== null}>
+            <img src={asset("match-xiaowen")} alt="" /><span><b>小温续力</b><small>+{EXTEND_MOVES_AMOUNT} 步数</small></span><i>{toolsLeft.extend}</i>
           </button>
         </div>
 
@@ -589,7 +662,18 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
         {status === "won" && <div className="confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, i) => <i key={i} />)}</div>}
       </section>
 
-      {(!tutorialReady || tutorialStep !== null) && <div className="tutorial-shield" aria-hidden="true" />}
+      {(!tutorialReady || tutorialStep !== null || stageIntroTier !== null) && <div className="tutorial-shield" aria-hidden="true" />}
+      {stageIntroTier !== null && tutorialStep === null && (
+        <section className="tutorial-coach match-tutorial centered" role="dialog" aria-modal="true" aria-live="polite">
+          <div className="tutorial-head">
+            <img src={asset("match-339")} alt="339 机器人" />
+            <span>{STAGE_INTRO[stageIntroTier]?.name}</span>
+          </div>
+          <h2>新的阶段开始了</h2>
+          <p>{STAGE_INTRO[stageIntroTier]?.text}</p>
+          <button className="tutorial-button pressable" onClick={() => setStageIntroTier(null)}>知道了</button>
+        </section>
+      )}
       {tutorialStep !== null && (
         <section className={`tutorial-coach match-tutorial ${tutorialStep === 0 ? "centered" : ""}`} role="dialog" aria-modal="true" aria-live="polite">
           <div className="tutorial-head">
@@ -602,7 +686,7 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
           )}
           {tutorialStep === 1 && <><h2>试试交换这两格</h2><p>高亮的两个格子交换后，最下面会连成三个一样的图标。先点左边高亮格，再点右边高亮格。</p><span className="tutorial-wait">等待你完成交换…</span></>}
           {tutorialStep === 2 && <><h2>步数、目标与特殊块</h2><p>每一关都有<b className="number-rule">步数上限</b>，用完还没达成目标就算失败。连起 4 个会变成条纹块（清一整行/列），拐角形（L/T）会变成炸弹块（清周围 3×3），连起 5 个直线才会变成彩虹块（清掉同色全部，威力最大也最难凑出）。</p><button className="tutorial-button pressable" onClick={() => setTutorialStep(3)}>知道了，继续</button></>}
-          {tutorialStep === 3 && <><h2>三个小帮手</h2><p><b>339 洗牌</b>可以重新排列棋盘；<b>小顾提示</b>会高亮最有助于完成目标的一步（不是随便一个能消的）；<b>小温炸弹</b>能直接清掉任意一格（消耗一步）。都限量使用，谨慎选择时机。</p><button className="tutorial-button pressable" onClick={finishTutorial}>开始正式挑战</button></>}
+          {tutorialStep === 3 && <><h2>三个小帮手</h2><p><b>339 洗牌</b>会重排棋盘，而且保证换完一定有一手大连击等你打出来；<b>小顾炸弹</b>能直接炸开任意一格周围 3×3；<b>小温续力</b>能直接多给你 {EXTEND_MOVES_AMOUNT} 步。都限量使用，谨慎选择时机。每个阶段还能单独选<b>简单/中等/高级</b>难度，在关卡选择里就能切换，想练手就选简单，想挑战就选高级。</p><button className="tutorial-button pressable" onClick={finishTutorial}>开始正式挑战</button></>}
         </section>
       )}
 
@@ -614,21 +698,34 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
             <span className="mission-tag">{MATCH_LEVEL_COUNT} 关甜蜜配方</span>
             <h2 id="match-level-picker-title">选择关卡</h2>
             <div className="match-level-groups">
-              {tierList().map((tier) => (
-                <div className="match-level-group" key={tier.tierIndex}>
-                  <p className="match-level-group-title">{tier.name}<small>第 {tier.start + 1}–{tier.start + tier.count} 关</small></p>
-                  <div className="match-level-grid">
-                    {Array.from({ length: tier.count }, (_, offset) => tier.start + offset).map((index) => {
-                      const locked = index + 1 > unlockedLevel;
-                      return (
-                        <button key={index} className={`match-level-tile pressable ${index === levelIndex ? "current" : ""}`} disabled={locked} onClick={() => chooseLevel(index)}>
-                          {locked ? "🔒" : index + 1}
-                        </button>
-                      );
-                    })}
+              {tierList().map((tier) => {
+                const currentDifficulty = tierDifficulty[tier.tierIndex] ?? "normal";
+                const unlockedForTier = unlockedByDifficulty[currentDifficulty];
+                return (
+                  <div className="match-level-group" key={tier.tierIndex}>
+                    <p className="match-level-group-title">{tier.name}<small>第 {tier.start + 1}–{tier.start + tier.count} 关</small></p>
+                    <div className="match-difficulty-toggle" role="group" aria-label={`${tier.name} 难度选择`}>
+                      {MATCH_DIFFICULTIES.map((option) => (
+                        <button
+                          key={option.id}
+                          className={`match-difficulty-btn pressable ${currentDifficulty === option.id ? "active" : ""}`}
+                          onClick={() => setTierDifficultyAt(tier.tierIndex, option.id)}
+                        >{option.label}</button>
+                      ))}
+                    </div>
+                    <div className="match-level-grid">
+                      {Array.from({ length: tier.count }, (_, offset) => tier.start + offset).map((index) => {
+                        const locked = index + 1 > unlockedForTier;
+                        return (
+                          <button key={index} className={`match-level-tile pressable ${index === levelIndex ? "current" : ""}`} disabled={locked} onClick={() => chooseLevel(index)}>
+                            {locked ? "🔒" : index + 1}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         </div>
@@ -645,9 +742,11 @@ export function MatchGame({ onBack }: { onBack: () => void }) {
               <li><b>交换</b>：点一个格子再点相邻格子，会尝试交换；交换后能凑成三连才会真正生效。</li>
               <li><b>特殊块</b>：四连生成条纹块（清一整行/列），拐角形（L/T）生成炸弹块（清周围 3×3），五连直线才会生成彩虹块（清掉同色全部）。</li>
               <li><b>糖霜格</b>：薄糖霜碰一次就化开，厚奶油需要两次；相邻的消除也能帮忙化掉一层。</li>
+              <li><b>计分</b>：消除小顾、小温得分更高（每格15分），其他材料每格10分，生成/触发特殊块还有额外加分。</li>
               <li><b>步数与目标</b>：每关步数有限，达成全部目标即通关，步数用完还没达成就要重开。</li>
-              <li><b>三个道具</b>：339 洗牌、小顾提示（推荐最有助于完成目标的一步，不是随便一个能消的）、小温炸弹，每关限量，谨慎使用。</li>
+              <li><b>三个道具</b>：339 洗牌（重排棋盘，并保证换完一定留有一手大连击）、小顾炸弹（点棋盘任意一格，炸开周围 3×3）、小温续力（直接多给 {EXTEND_MOVES_AMOUNT} 步），每关限量，谨慎使用。</li>
               <li><b>关卡随机</b>：每次进入或重开关卡，棋盘图标都会重新随机排列。</li>
+              <li><b>难度选择</b>：在「选择关卡」里，每个阶段都能单独选简单/中等/高级，切换后步数、障碍和目标数值都会一起调整；三档难度的通关进度各自独立。</li>
             </ol>
             <button className="primary-button pressable" onClick={() => setShowHelp(false)}>明白，开始消除</button>
           </section>

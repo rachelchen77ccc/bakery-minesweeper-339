@@ -3,6 +3,7 @@ import {
   findMatchRuns,
   hasAnyValidMove,
   neighborsOf,
+  ICON_SCORE_VALUE,
   type GoalRule,
   type MatchBoard,
   type MatchCell,
@@ -196,19 +197,33 @@ export function resolveStep(
   let specialsTriggered = 0;
   const clearSet = new Set<number>();
   const sweptIndexes = new Set<number>();
+  const triggeredCells = new Set<number>();
 
-  pendingTriggers.forEach((index) => {
+  // A special tile fires its AoE whenever it's cleared at all — not just when
+  // the player's swap landed on it directly. Getting swept into an ordinary
+  // 3-match (or into another special's blast) still pops it, and can chain
+  // into further specials, so this recurses through whatever it sweeps in.
+  const triggerSpecialAt = (index: number) => {
+    if (triggeredCells.has(index)) return;
     const cell = board.cells[index];
     if (!cell.active || !cell.special) return;
+    triggeredCells.add(index);
     specialsTriggered += 1;
     specialAffectedCells(board, index, cell.special, cell.icon).forEach((affected) => {
+      const alreadyQueued = clearSet.has(affected);
       clearSet.add(affected);
       if (affected !== index) sweptIndexes.add(affected);
+      if (!alreadyQueued) triggerSpecialAt(affected);
     });
-  });
+  };
+
+  pendingTriggers.forEach((index) => triggerSpecialAt(index));
 
   const runs = findMatchRuns(board.cells, board.width, board.height);
-  runs.forEach((run) => run.cells.forEach((index) => clearSet.add(index)));
+  runs.forEach((run) => run.cells.forEach((index) => {
+    clearSet.add(index);
+    triggerSpecialAt(index);
+  }));
 
   if (clearSet.size === 0) {
     return { board, collectGain, obstacleCleared, scoreGain, cellsCleared, specialsCreated, specialsTriggered, clearedIndexes: clearSet, sweptIndexes, fallOffsets: new Map(), stable: true };
@@ -220,7 +235,7 @@ export function resolveStep(
     const cell = board.cells[index];
     if (!cell.active || cell.icon === null) return;
     addGain(collectGain, cell.icon);
-    scoreGain += 10;
+    scoreGain += ICON_SCORE_VALUE[cell.icon];
     cellsCleared += 1;
     if (cell.cover > 0) {
       cell.cover -= 1;
@@ -349,7 +364,7 @@ export function detonateSeed(board: MatchBoard, index: number, randomFn: () => n
       obstacleCleared += 1;
     } else {
       addGain(collectGain, cell.icon);
-      scoreGain += 10;
+      scoreGain += ICON_SCORE_VALUE[cell.icon];
       cellsCleared += 1;
       cell.icon = null;
       cell.special = null;
@@ -406,40 +421,193 @@ export function shuffleBoard(board: MatchBoard, randomFn: () => number = Math.ra
   return next;
 }
 
-/**
- * Scores every legal swap by how much it actually advances the level's
- * remaining goals (plus a bonus for creating specials), instead of just
- * returning the first swap that clears anything. This is what "小顾提示"
- * uses so a stuck player gets pointed at the move that matters, not an
- * arbitrary one.
- */
-export function findBestHintSwap(board: MatchBoard, goals: GoalRule[], progress: MatchProgress): [number, number] | null {
+function hasBigMoveAvailable(board: MatchBoard): boolean {
   const { cells, width, height } = board;
-  const unmetGoals = goals.filter((goal) => !goalStatus(goal, progress).done);
-  const scoredGoals = unmetGoals.length ? unmetGoals : goals;
-  let best: [number, number] | null = null;
-  let bestScore = -1;
-
   for (let index = 0; index < cells.length; index += 1) {
     if (!cells[index].active) continue;
     for (const neighbor of neighborsOf(index, width, height)) {
       if (neighbor < index || !cells[neighbor].active) continue;
-      const peek = peekSwap(board, index, neighbor);
-      if (!peek.valid) continue;
-      const result = resolveBoard(peek.swappedBoard, peek.triggers, peek.preferredPivot);
-      let score = result.scoreGain * 0.01 + result.specialsCreated * 3;
-      scoredGoals.forEach((goal) => {
-        if (goal.type === "collect") score += (result.collectGain[goal.icon] ?? 0) * 5;
-        else if (goal.type === "clearObstacles") score += result.obstacleCleared * 4;
-        else if (goal.type === "score") score += result.scoreGain * 0.02;
+      const trial = cloneBoard(board);
+      const icon = trial.cells[index].icon;
+      trial.cells[index].icon = trial.cells[neighbor].icon;
+      trial.cells[neighbor].icon = icon;
+      const runs = findMatchRuns(trial.cells, width, height);
+      if (runs.some((run) => run.cells.length >= 4)) return true;
+    }
+  }
+  return false;
+}
+
+type BigMoveSite = { lineCells: number[]; pivotPos: 1 | 2; partner: number };
+
+/**
+ * Looks for a place on the board's shape (mask only, ignores current icons)
+ * where a straight run of 4 active cells has a perpendicular active
+ * neighbor next to one of its two inner cells. That geometry is exactly
+ * what's needed for the classic "hidden 4-match" trick: fill the run of 4
+ * with the same icon except the inner cell, put that same icon on the
+ * perpendicular neighbor instead — swapping the inner cell with that
+ * neighbor completes the run to 4-in-a-row without any match existing yet.
+ */
+function findBigMoveConstructionSite(board: MatchBoard): BigMoveSite | null {
+  const { width, height, cells } = board;
+
+  const scanAxis = (
+    primaryLen: number,
+    secondaryLen: number,
+    indexOf: (primary: number, secondary: number) => number,
+  ): BigMoveSite | null => {
+    for (let secondary = 0; secondary < secondaryLen; secondary += 1) {
+      let runStart = -1;
+      for (let primary = 0; primary <= primaryLen; primary += 1) {
+        const active = primary < primaryLen && cells[indexOf(primary, secondary)].active;
+        if (active) {
+          if (runStart === -1) runStart = primary;
+          continue;
+        }
+        if (runStart === -1) continue;
+        const runLen = primary - runStart;
+        for (let windowStart = runStart; windowStart + 4 <= runStart + runLen; windowStart += 1) {
+          const lineCells = [0, 1, 2, 3].map((offset) => indexOf(windowStart + offset, secondary));
+          for (const pivotPos of [1, 2] as const) {
+            const pivotPrimary = windowStart + pivotPos;
+            const perpendicular = [secondary - 1, secondary + 1].filter((s) => s >= 0 && s < secondaryLen);
+            for (const s of perpendicular) {
+              const candidate = indexOf(pivotPrimary, s);
+              if (cells[candidate].active) {
+                return { lineCells, pivotPos, partner: candidate };
+              }
+            }
+          }
+        }
+        runStart = -1;
+      }
+    }
+    return null;
+  };
+
+  const horizontal = scanAxis(width, height, (col, row) => row * width + col);
+  if (horizontal) return horizontal;
+  return scanAxis(height, width, (row, col) => row * width + col);
+}
+
+/**
+ * Like shuffleBoard, but guarantees the resulting layout has at least one
+ * swap sitting there that would pop a 4+ run (a striped/bomb/rainbow-worthy
+ * combo) — the shuffle itself clears nothing, it just makes sure a big play
+ * is genuinely available for the player to take on their very next move.
+ */
+export function powerShuffleBoard(board: MatchBoard, randomFn: () => number = Math.random): MatchBoard {
+  const activeIndexes = board.cells.map((cell, index) => (cell.active ? index : -1)).filter((index) => index >= 0);
+  const { iconPool } = board;
+
+  const randomRetryFallback = () => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const next = cloneBoard(board);
+      activeIndexes.forEach((index) => {
+        next.cells[index].icon = iconPool[Math.floor(randomFn() * iconPool.length)];
+        next.cells[index].special = null;
       });
-      if (score > bestScore) {
-        bestScore = score;
-        best = [index, neighbor];
+      if (findMatchRuns(next.cells, next.width, next.height).length > 0) continue;
+      if (hasBigMoveAvailable(next)) return next;
+    }
+    return shuffleBoard(board, randomFn);
+  };
+
+  const site = findBigMoveConstructionSite(board);
+  if (!site) return randomRetryFallback();
+
+  const { lineCells, pivotPos, partner } = site;
+  const pivotIndex = lineCells[pivotPos];
+  const fixedIndexes = new Set([...lineCells, partner]);
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const next = cloneBoard(board);
+    const iconX = iconPool[Math.floor(randomFn() * iconPool.length)];
+    const iconY = iconPool.length > 1 ? iconPool[(iconPool.indexOf(iconX) + 1) % iconPool.length] : iconX;
+
+    lineCells.forEach((index) => { next.cells[index].icon = iconX; next.cells[index].special = null; });
+    next.cells[pivotIndex].icon = iconY;
+    next.cells[partner].icon = iconX;
+    next.cells[partner].special = null;
+
+    activeIndexes.forEach((index) => {
+      if (fixedIndexes.has(index)) return;
+      next.cells[index].icon = iconPool[Math.floor(randomFn() * iconPool.length)];
+      next.cells[index].special = null;
+    });
+
+    let guard = 0;
+    let existing = findMatchRuns(next.cells, next.width, next.height);
+    while (existing.length > 0 && guard < 60) {
+      let touchedFreeCell = false;
+      existing.forEach((run) => run.cells.forEach((index) => {
+        if (fixedIndexes.has(index)) return;
+        next.cells[index].icon = iconPool[Math.floor(randomFn() * iconPool.length)];
+        touchedFreeCell = true;
+      }));
+      if (!touchedFreeCell) break;
+      existing = findMatchRuns(next.cells, next.width, next.height);
+      guard += 1;
+    }
+    if (existing.length === 0) return next;
+  }
+
+  return randomRetryFallback();
+}
+
+/** Clears every active cell in a (2*radius+1) square centered on `centerIndex`
+ * — one hit per cell against cover, same as a normal clear otherwise. */
+export function detonateArea(
+  board: MatchBoard,
+  centerIndex: number,
+  radius: number,
+  randomFn: () => number = Math.random,
+): StepResult {
+  const working = cloneBoard(board);
+  const { width, height, cells } = working;
+  const centerRow = Math.floor(centerIndex / width);
+  const centerCol = centerIndex % width;
+  let cellsCleared = 0;
+  let obstacleCleared = 0;
+  let scoreGain = 0;
+  const collectGain: Partial<Record<MatchIconId, number>> = {};
+  const clearedIndexes = new Set<number>();
+  for (let dr = -radius; dr <= radius; dr += 1) {
+    for (let dc = -radius; dc <= radius; dc += 1) {
+      const row = centerRow + dr;
+      const col = centerCol + dc;
+      if (row < 0 || row >= height || col < 0 || col >= width) continue;
+      const index = row * width + col;
+      const cell = cells[index];
+      if (!cell.active || cell.icon === null) continue;
+      clearedIndexes.add(index);
+      if (cell.cover > 0) {
+        cell.cover -= 1;
+        obstacleCleared += 1;
+      } else {
+        addGain(collectGain, cell.icon);
+        scoreGain += ICON_SCORE_VALUE[cell.icon];
+        cellsCleared += 1;
+        cell.icon = null;
+        cell.special = null;
       }
     }
   }
-  return best;
+  const fallOffsets = applyGravity(working, randomFn);
+  return {
+    board: working,
+    collectGain,
+    obstacleCleared,
+    scoreGain,
+    cellsCleared,
+    specialsCreated: 0,
+    specialsTriggered: 0,
+    clearedIndexes,
+    sweptIndexes: new Set(),
+    fallOffsets,
+    stable: clearedIndexes.size === 0,
+  };
 }
 
 export type { MatchBoard, MatchCell };
