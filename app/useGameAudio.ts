@@ -53,6 +53,16 @@ const SFX_MIX: Record<SfxName, { gain: number; duck: number; duration: number }>
 
 const SFX_NAMES = Object.keys(SFX_MIX) as SfxName[];
 
+// Extra variants are optional — files that don't exist yet just 404 silently
+// and playback falls back to the base (no-suffix) file, so this is safe to
+// ship before the matching audio assets exist.
+const SFX_VARIANT_SUFFIXES = ["", "-b", "-c"];
+const BGM_TRACK_BASENAMES = ["bakery-loop", "bakery-loop-2", "bakery-loop-3", "bakery-loop-4"];
+
+function pickRandomBgmTrack() {
+  return BGM_TRACK_BASENAMES[Math.floor(Math.random() * BGM_TRACK_BASENAMES.length)];
+}
+
 function embeddedAudioBundlePath() {
   return document.documentElement.dataset.audioBundle ?? "";
 }
@@ -97,7 +107,7 @@ function useGameAudioController(gamePaused = false) {
 
   const embeddedModeRef = useRef(false);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
-  const sfxRef = useRef<Partial<Record<SfxName, HTMLAudioElement>>>({});
+  const sfxRef = useRef<Partial<Record<SfxName, HTMLAudioElement[]>>>({});
   const webAudioRef = useRef<AudioContext | null>(null);
   const webBgmGainRef = useRef<GainNode | null>(null);
   const webBgmSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -198,10 +208,15 @@ function useGameAudioController(gamePaused = false) {
       }
       SFX_NAMES.forEach((name) => {
         if (sfxRef.current[name]) return;
-        const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
-        sound.preload = "auto";
-        sound.load();
-        sfxRef.current[name] = sound;
+        sfxRef.current[name] = SFX_VARIANT_SUFFIXES.map((suffix, variantIndex) => {
+          const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}${suffix}.mp3?v=${SFX_CACHE_VERSION}`);
+          // Only eagerly fetch the guaranteed base clip; extra variants are
+          // loaded on demand the first time they're actually picked to play,
+          // so a project with no variant files yet doesn't spam 404s upfront.
+          sound.preload = variantIndex === 0 ? "auto" : "none";
+          if (variantIndex === 0) sound.load();
+          return sound;
+        });
       });
     };
     if ("requestIdleCallback" in window) warmIdleRef.current = window.requestIdleCallback(warm, { timeout: 1200 });
@@ -232,11 +247,23 @@ function useGameAudioController(gamePaused = false) {
       bgm.preload = "none";
       bgm.loop = musicLoopRef.current;
       bgm.volume = musicVolumeRef.current;
+      // Non-looping playback rotates to a fresh random track instead of just stopping.
+      bgm.addEventListener("ended", () => {
+        if (!musicEnabledRef.current || gamePausedRef.current) return;
+        bgm.src = `${AUDIO_ROOT}/bgm/${pickRandomBgmTrack()}.mp3`;
+        void bgm.play().catch(() => undefined);
+      });
+      // Extra tracks may not exist yet — fall back to the guaranteed base track.
+      bgm.addEventListener("error", () => {
+        if (bgm.src.endsWith("/bakery-loop.mp3")) return;
+        bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+        if (musicEnabledRef.current && !gamePausedRef.current && unlockedRef.current) void bgm.play().catch(() => undefined);
+      });
       bgmRef.current = bgm;
     }
     return () => {
       bgmRef.current?.pause();
-      Object.values(sfxRef.current).forEach((sound) => sound?.pause());
+      Object.values(sfxRef.current).forEach((sounds) => sounds?.forEach((sound) => sound.pause()));
       webBgmSourceRef.current?.stop();
       webSfxSourcesRef.current.forEach((source) => source.stop());
       if (webAudioRef.current) void webAudioRef.current.close().catch(() => undefined);
@@ -272,7 +299,7 @@ function useGameAudioController(gamePaused = false) {
         bgm.volume = Math.min(1, musicVolume * duckFactorRef.current);
         if (!musicEnabled || gamePaused) bgm.pause();
         else if (unlockedRef.current) {
-          if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+          if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/${pickRandomBgmTrack()}.mp3`;
           void bgm.play().catch(() => undefined);
         }
       }
@@ -319,7 +346,7 @@ function useGameAudioController(gamePaused = false) {
     } else {
       const bgm = bgmRef.current;
       if (bgm && !gamePausedRef.current && musicEnabledRef.current && bgm.paused) {
-        if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/bakery-loop.mp3`;
+        if (!bgm.getAttribute("src")) bgm.src = `${AUDIO_ROOT}/bgm/${pickRandomBgmTrack()}.mp3`;
         void bgm.play().catch(() => undefined);
       }
     }
@@ -355,16 +382,29 @@ function useGameAudioController(gamePaused = false) {
       return;
     }
 
-    let sound = sfxRef.current[name];
-    if (!sound) {
-      sound = new Audio(`${AUDIO_ROOT}/sfx/${name}.mp3?v=${SFX_CACHE_VERSION}`);
-      sound.preload = "none";
-      sfxRef.current[name] = sound;
+    let sounds = sfxRef.current[name];
+    if (!sounds) {
+      sounds = SFX_VARIANT_SUFFIXES.map((suffix) => {
+        const sound = new Audio(`${AUDIO_ROOT}/sfx/${name}${suffix}.mp3?v=${SFX_CACHE_VERSION}`);
+        sound.preload = "none";
+        return sound;
+      });
+      sfxRef.current[name] = sounds;
     }
+    const base = sounds[0];
+    const sound = sounds[Math.floor(Math.random() * sounds.length)];
     sound.pause();
+    // eslint-disable-next-line react-hooks/immutability -- HTMLAudioElement playback state is imperative by design; this is exactly what refs are for.
     sound.currentTime = 0;
     sound.volume = Math.min(1, sfxVolumeRef.current * mix.gain);
-    void sound.play().catch(() => undefined);
+    void sound.play().catch(() => {
+      // The variant file may not exist yet — fall back to the guaranteed base clip.
+      if (sound === base) return;
+      base.pause();
+      base.currentTime = 0;
+      base.volume = sound.volume;
+      void base.play().catch(() => undefined);
+    });
     duckBgm(mix.duck, mix.duration);
   }, [decodeEmbeddedAudio, duckBgm, ensureWebAudioContext]);
 

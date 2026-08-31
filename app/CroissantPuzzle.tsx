@@ -858,7 +858,7 @@ export function CroissantPuzzle({ onBack }: { onBack: () => void }) {
     <main className={`game-shell platter-shell ${!tutorialReady || tutorialStep !== null ? "tutorial-active" : ""}`} onPointerDown={unlockAudio}>
       <header className="topbar platter-topbar">
         <button className="brand-mark mode-back pressable" onClick={onBack} aria-label="返回游戏模式选择"><img src={`${ASSET_ROOT}/xiaowen.webp`} alt="小温" decoding="async" fetchPriority="high" /><span>‹</span></button>
-        <div className="title-block"><p className="eyebrow">CROISSANT LOGIC</p><h1>牛角包摆盘</h1></div>
+        <div className="title-block"><p className="eyebrow">CROISSANT LOGIC</p><h1>小温的牛角包摆盘</h1></div>
         <div className="top-actions">
           <button className={`round-button audio-button pressable ${allMuted ? "muted" : ""}`} onClick={() => { setMusicEnabled(allMuted); setSfxEnabled(allMuted); if (!allMuted) playSfx("click"); }} aria-label={allMuted ? "打开声音" : "关闭声音"}>♫</button>
           <button className="round-button pressable" onClick={() => { playSfx("click"); setShowRules(true); }} aria-label="查看摆盘规则">?</button>

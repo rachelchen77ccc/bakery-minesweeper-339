@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { CroissantPuzzle } from "./CroissantPuzzle";
+import { MatchGame } from "./MatchGame";
 import { GameAudioProvider, useGameAudio } from "./useGameAudio";
 
 type Breakfast = "croissant" | "bread" | null;
@@ -45,7 +46,7 @@ const TUTORIAL_REVEAL_TARGET = 40;
 const TUTORIAL_MINE_TARGET = 41;
 const TUTORIAL_STORAGE_KEY = "bakery-tutorial-v2-complete";
 
-type BakeryMode = "menu" | "minesweeper" | "platter";
+type BakeryMode = "menu" | "minesweeper" | "platter" | "match";
 
 export default function Home() {
   return <GameAudioProvider><BakeryApp /></GameAudioProvider>;
@@ -80,6 +81,7 @@ function BakeryApp() {
 
   if (mode === "minesweeper") return <MinesweeperMode onBack={() => setMode("menu")} />;
   if (mode === "platter") return <CroissantPuzzle onBack={() => setMode("menu")} />;
+  if (mode === "match") return <MatchGame onBack={() => setMode("menu")} />;
 
   return (
     <main className="mode-menu-shell" onPointerDown={unlockAudio}>
@@ -94,21 +96,21 @@ function BakeryApp() {
       </figure>
       <section className="mode-choice-list" aria-label="选择游戏模式">
         <button className="mode-choice minesweeper-choice pressable" onClick={() => setMode("minesweeper")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/339.webp`} alt="" decoding="async" /><i>?</i></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/339.webp`} alt="" decoding="async" /></span>
           <span className="mode-choice-copy"><small>经典寻宝</small><b>顾温甜蜜扫雷</b><em>看数字、避开烤焦面包，找齐早餐</em></span>
           <strong>开始 ›</strong>
         </button>
         <button className="mode-choice platter-choice pressable" onClick={() => setMode("platter")}>
-          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/croissant.webp`} alt="" decoding="async" /><i>36</i></span>
-          <span className="mode-choice-copy"><small>全新推理</small><b>牛角包摆盘</b><em>颜色、行列与假设法，36 关挑战到 15×15</em></span>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/xiaowen.webp`} alt="" decoding="async" /></span>
+          <span className="mode-choice-copy"><small>全新推理</small><b>小温的牛角包摆盘</b><em>颜色、行列与假设法，36 关挑战到 15×15</em></span>
+          <strong>挑战 ›</strong>
+        </button>
+        <button className="mode-choice match-choice pressable" onClick={() => setMode("match")}>
+          <span className="mode-choice-art"><img src={`${ASSET_ROOT}/xiaogu.webp`} alt="" decoding="async" /></span>
+          <span className="mode-choice-copy"><small>限步消除</small><b>小顾的甜蜜消消乐</b><em>9×9 起步，形状棋盘 + 特殊块，339 关一路变难</em></span>
           <strong>挑战 ›</strong>
         </button>
       </section>
-      <div className="mode-menu-coming" aria-label="更多游戏即将上线">
-        <span>MORE GAMES</span>
-        <b>更多烘焙小游戏</b>
-        <small>COMING SOON · 敬请期待</small>
-      </div>
       <div className="mode-menu-cast mode-menu-cast-copy" aria-hidden="true"><span>小顾 ♡ 小温</span></div>
       <p className="mode-menu-note">每位玩家进度独立 · 仅保存在自己的当前设备</p>
     </main>
