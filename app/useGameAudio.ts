@@ -14,8 +14,10 @@ import {
 } from "react";
 
 export type SfxName = "reveal" | "flag" | "help" | "win" | "lose" | "click";
-type EmbeddedAudioName = "bgm" | SfxName;
-type EmbeddedAudioMap = Record<EmbeddedAudioName, string>;
+// bgm is an array — the mini-tool zip embeds every BGM track it has (see
+// scripts/package-minitool.mjs) so playback can rotate between them instead
+// of always looping a single clip.
+type EmbeddedAudioMap = { bgm: string[] } & Record<SfxName, string>;
 
 type AudioSettings = {
   musicEnabled: boolean;
@@ -112,7 +114,9 @@ function useGameAudioController(gamePaused = false) {
   const webBgmGainRef = useRef<GainNode | null>(null);
   const webBgmSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const webBgmStartingRef = useRef<Promise<void> | null>(null);
-  const webBuffersRef = useRef<Partial<Record<EmbeddedAudioName, AudioBuffer>>>({});
+  const webBuffersRef = useRef<Partial<Record<SfxName, AudioBuffer>>>({});
+  const webBgmBuffersRef = useRef<AudioBuffer[]>([]);
+  const startEmbeddedBgmRef = useRef<() => void>(() => undefined);
   const webSfxSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const duckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const warmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -153,7 +157,7 @@ function useGameAudioController(gamePaused = false) {
     gain.gain.setValueAtTime(volume, context.currentTime);
   }, []);
 
-  const decodeEmbeddedAudio = useCallback(async (name: EmbeddedAudioName) => {
+  const decodeEmbeddedAudio = useCallback(async (name: SfxName) => {
     const cached = webBuffersRef.current[name];
     if (cached) return cached;
     const context = ensureWebAudioContext();
@@ -163,19 +167,32 @@ function useGameAudioController(gamePaused = false) {
     return buffer;
   }, [ensureWebAudioContext]);
 
+  const decodeEmbeddedBgmBuffers = useCallback(async () => {
+    if (webBgmBuffersRef.current.length) return webBgmBuffersRef.current;
+    const context = ensureWebAudioContext();
+    const audioData = await loadEmbeddedAudioData();
+    const buffers = await Promise.all(audioData.bgm.map((track) => context.decodeAudioData(decodeBase64Audio(track))));
+    webBgmBuffersRef.current = buffers;
+    return buffers;
+  }, [ensureWebAudioContext]);
+
+  // Embedded bgm sources never natively loop — "循环播放" is implemented as
+  // picking a fresh random track each time the current one ends, so the
+  // mini-tool zip rotates through all its BGM instead of repeating one clip.
   const startEmbeddedBgm = useCallback(() => {
     if (webBgmSourceRef.current || webBgmStartingRef.current || gamePausedRef.current || !musicEnabledRef.current) return;
     ensureWebAudioContext();
     webBgmStartingRef.current = (async () => {
       const context = ensureWebAudioContext();
-      const buffer = await decodeEmbeddedAudio("bgm");
-      if (webBgmSourceRef.current || gamePausedRef.current || !musicEnabledRef.current) return;
+      const buffers = await decodeEmbeddedBgmBuffers();
+      if (webBgmSourceRef.current || gamePausedRef.current || !musicEnabledRef.current || !buffers.length) return;
       const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.loop = musicLoopRef.current;
+      source.buffer = buffers[Math.floor(Math.random() * buffers.length)];
       source.connect(webBgmGainRef.current!);
       source.addEventListener("ended", () => {
-        if (webBgmSourceRef.current === source) webBgmSourceRef.current = null;
+        if (webBgmSourceRef.current !== source) return;
+        webBgmSourceRef.current = null;
+        if (musicLoopRef.current && musicEnabledRef.current && !gamePausedRef.current) startEmbeddedBgmRef.current?.();
       });
       webBgmSourceRef.current = source;
       updateWebBgmGain();
@@ -183,7 +200,10 @@ function useGameAudioController(gamePaused = false) {
     })().catch(() => undefined).finally(() => {
       webBgmStartingRef.current = null;
     });
-  }, [decodeEmbeddedAudio, ensureWebAudioContext, updateWebBgmGain]);
+  }, [decodeEmbeddedBgmBuffers, ensureWebAudioContext, updateWebBgmGain]);
+  useEffect(() => {
+    startEmbeddedBgmRef.current = startEmbeddedBgm;
+  }, [startEmbeddedBgm]);
 
   const duckBgm = useCallback((factor: number, duration: number) => {
     if (!musicEnabledRef.current || factor >= 1) return;

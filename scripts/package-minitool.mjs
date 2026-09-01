@@ -23,25 +23,30 @@ const optionalFiles = [
 for (const file of optionalFiles) rmSync(join(dist, file), { force: true });
 writeFileSync(join(dist, "index.html"), readFileSync(join(root, "minitool/index.html")));
 
-const miniToolBgm = join(dist, "audio/bgm/minitool-loop.m4a");
+// All BGM basenames the game rotates through in the dev/GitHub-Pages build
+// (see BGM_TRACK_BASENAMES in app/useGameAudio.ts) — embed every one that
+// actually has a source file so the mini-tool zip gets the same variety
+// instead of always looping a single track.
+const bgmBasenames = ["bakery-loop", "bakery-loop-2", "bakery-loop-3", "bakery-loop-4"]
+  .filter((basename) => existsSync(join(dist, `audio/bgm/${basename}.mp3`)));
+if (bgmBasenames.length === 0) throw new Error("缺少音频源文件：audio/bgm/bakery-loop*.mp3");
+
+const bgmSourceFiles = bgmBasenames.map((basename) => `audio/bgm/${basename}.mp3`);
 if (process.platform === "darwin") {
-  const rawTrim = join(dist, "audio/bgm/minitool-loop-raw.m4a");
-  execFileSync("xcrun", [
-    "swift",
-    join(root, "scripts/trim-minitool-bgm.swift"),
-    join(dist, "audio/bgm/bakery-loop.mp3"),
-    rawTrim,
-  ], { stdio: "pipe" });
-  // AVAssetExportPresetAppleM4A has no bitrate knob and lands ~250kbps, which
-  // pushes a 36s loop over the skill's 1 MiB embedded-Base64 hard limit.
-  // Re-encode at 96kbps — still solid quality for a background loop — to get
-  // comfortably under budget.
-  execFileSync("afconvert", ["-f", "m4af", "-d", "aac", "-b", "96000", "-q", "127", "-s", "2", rawTrim, miniToolBgm], { stdio: "pipe" });
-  rmSync(rawTrim, { force: true });
+  // AVAssetExportPresetAppleM4A has no bitrate knob and lands ~250kbps; with
+  // 4 tracks embedded instead of 1, use 64kbps (still fine for background
+  // music under SFX) to keep the combined Base64 payload reasonable.
+  bgmSourceFiles.forEach((file, index) => {
+    const rawTrim = join(dist, `audio/bgm/minitool-loop-${index}-raw.m4a`);
+    const encoded = join(dist, `audio/bgm/minitool-loop-${index}.m4a`);
+    execFileSync("xcrun", ["swift", join(root, "scripts/trim-minitool-bgm.swift"), join(dist, file), rawTrim], { stdio: "pipe" });
+    execFileSync("afconvert", ["-f", "m4af", "-d", "aac", "-b", "64000", "-q", "127", "-s", "2", rawTrim, encoded], { stdio: "pipe" });
+    rmSync(rawTrim, { force: true });
+    bgmSourceFiles[index] = `audio/bgm/minitool-loop-${index}.m4a`;
+  });
 }
 
-const embeddedAudioSources = {
-  bgm: process.platform === "darwin" ? "audio/bgm/minitool-loop.m4a" : "audio/bgm/bakery-loop.mp3",
+const sfxSources = {
   reveal: "audio/sfx/reveal.mp3",
   flag: "audio/sfx/flag.mp3",
   help: "audio/sfx/help.mp3",
@@ -49,11 +54,15 @@ const embeddedAudioSources = {
   lose: "audio/sfx/lose.mp3",
   click: "audio/sfx/click.mp3",
 };
-const embeddedAudio = Object.fromEntries(Object.entries(embeddedAudioSources).map(([name, file]) => {
+const readBase64 = (file) => {
   const absolute = join(dist, file);
   if (!existsSync(absolute)) throw new Error(`缺少音频源文件：${file}`);
-  return [name, readFileSync(absolute).toString("base64")];
-}));
+  return readFileSync(absolute).toString("base64");
+};
+const embeddedAudio = {
+  bgm: bgmSourceFiles.map(readBase64),
+  ...Object.fromEntries(Object.entries(sfxSources).map(([name, file]) => [name, readBase64(file)])),
+};
 writeFileSync(join(dist, "assets/audio-data.js"), `window.__BAKERY_AUDIO__=${JSON.stringify(embeddedAudio)};\n`);
 rmSync(join(dist, "audio"), { recursive: true, force: true });
 
@@ -125,16 +134,22 @@ const audioBundleMatch = html.match(/data-audio-bundle="([^"]+)"/);
 if (!audioBundleMatch) failures.push("缺少 data-audio-bundle 音频数据包声明");
 else if (!existsSync(join(dist, audioBundleMatch[1].replace(/^\.\//, "")))) failures.push("音频数据包引用不存在");
 const EMBEDDED_BASE64_HARD_LIMIT = 1024 * 1024;
-for (const name of Object.keys(embeddedAudioSources)) {
-  if (!Object.hasOwn(embeddedAudio, name) || !embeddedAudio[name]) {
-    failures.push(`音频数据包缺少：${name}`);
-    continue;
+const checkEmbeddedBlob = (label, base64) => {
+  if (!base64) {
+    failures.push(`音频数据包缺少：${label}`);
+    return;
   }
-  const decodedBytes = Buffer.from(embeddedAudio[name], "base64").length;
+  const decodedBytes = Buffer.from(base64, "base64").length;
   if (decodedBytes > EMBEDDED_BASE64_HARD_LIMIT) {
-    failures.push(`音频数据包 ${name} 解码后 ${(decodedBytes / 1024).toFixed(0)} KiB，超过单条 Base64 1 MiB 硬上限`);
+    failures.push(`音频数据包 ${label} 解码后 ${(decodedBytes / 1024).toFixed(0)} KiB，超过单条 Base64 1 MiB 硬上限`);
   }
+};
+if (!Array.isArray(embeddedAudio.bgm) || embeddedAudio.bgm.length === 0) {
+  failures.push("音频数据包缺少：bgm（需要至少一条 BGM）");
+} else {
+  embeddedAudio.bgm.forEach((base64, index) => checkEmbeddedBlob(`bgm[${index}]`, base64));
 }
+for (const name of Object.keys(sfxSources)) checkEmbeddedBlob(name, embeddedAudio[name]);
 
 const referencedAssets = [...js.matchAll(/["'`]assets\/([^"'`?]+)/g)].map((match) => `assets/${match[1]}`);
 for (const source of new Set(referencedAssets)) {
@@ -170,7 +185,7 @@ const report = [
   "文件类型：仅包含 html / css / js / webp，未包含 mp3 或其他白名单外扩展名",
   "端能力：未发现网络请求、Worker、定位、剪贴板、新窗口、iframe 等禁用能力",
   "跨端：Pointer Events、viewport-fit=cover、容器/真机双安全区变量",
-  "声音：首页预载音乐，首次轻点立即播放；支持分别关闭 BGM/音效及关闭循环",
+  `声音：首页预载音乐，首次轻点立即播放；内置 ${bgmBasenames.length} 条 BGM 随机轮播（播完自动换下一条，不重复同一条），支持分别关闭 BGM/音效及关闭循环`,
   "摆盘：36 关，后期取消预放，最大 15×15；包含颜色/行列无解检测与假设法反证提示",
   "双击：识别窗口放宽至 480ms；排除操作不触发中途警告，确认摆放后才检查无解",
   `产物：${artifact}`,
