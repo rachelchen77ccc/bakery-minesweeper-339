@@ -573,7 +573,7 @@ html[data-minitool="true"] .puzzle-board { width: min(100%, max(200px, calc(100d
 .match-level-tile.current { color: #fff; border-color: #c65a2c; background: var(--match-caramel); box-shadow: 0 2px 0 #6b4226; }
 .match-level-tile:disabled { color: #b39a80; background: #f1e6d2; box-shadow: none; opacity: .7; }
 .match-tutorial .tutorial-head img { border-radius: 10px; }
-.mode-choice.match-choice { border-color: var(--match-line); background: #fffaf0; box-shadow: 0 5px 0 rgba(154,110,58,.18); }
+.mode-choice.match-choice { border-color: #e9d0a0; background: #fffaf0; box-shadow: 0 5px 0 rgba(154,110,58,.18); }
 .mode-choice.match-choice .mode-choice-art { position: relative; background: #fbe7bd; overflow: hidden; }
 .mode-choice.match-choice .mode-choice-art::after { content: ""; position: absolute; right: -14px; top: -14px; width: 30px; height: 30px; background: var(--match-butter); transform: rotate(45deg); }
 .mode-choice.match-choice .mode-choice-copy small { color: #b3792f; }
