@@ -25,12 +25,19 @@ writeFileSync(join(dist, "index.html"), readFileSync(join(root, "minitool/index.
 
 const miniToolBgm = join(dist, "audio/bgm/minitool-loop.m4a");
 if (process.platform === "darwin") {
+  const rawTrim = join(dist, "audio/bgm/minitool-loop-raw.m4a");
   execFileSync("xcrun", [
     "swift",
     join(root, "scripts/trim-minitool-bgm.swift"),
     join(dist, "audio/bgm/bakery-loop.mp3"),
-    miniToolBgm,
+    rawTrim,
   ], { stdio: "pipe" });
+  // AVAssetExportPresetAppleM4A has no bitrate knob and lands ~250kbps, which
+  // pushes a 36s loop over the skill's 1 MiB embedded-Base64 hard limit.
+  // Re-encode at 96kbps — still solid quality for a background loop — to get
+  // comfortably under budget.
+  execFileSync("afconvert", ["-f", "m4af", "-d", "aac", "-b", "96000", "-q", "127", "-s", "2", rawTrim, miniToolBgm], { stdio: "pipe" });
+  rmSync(rawTrim, { force: true });
 }
 
 const embeddedAudioSources = {
@@ -117,8 +124,16 @@ for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
 const audioBundleMatch = html.match(/data-audio-bundle="([^"]+)"/);
 if (!audioBundleMatch) failures.push("缺少 data-audio-bundle 音频数据包声明");
 else if (!existsSync(join(dist, audioBundleMatch[1].replace(/^\.\//, "")))) failures.push("音频数据包引用不存在");
+const EMBEDDED_BASE64_HARD_LIMIT = 1024 * 1024;
 for (const name of Object.keys(embeddedAudioSources)) {
-  if (!Object.hasOwn(embeddedAudio, name) || !embeddedAudio[name]) failures.push(`音频数据包缺少：${name}`);
+  if (!Object.hasOwn(embeddedAudio, name) || !embeddedAudio[name]) {
+    failures.push(`音频数据包缺少：${name}`);
+    continue;
+  }
+  const decodedBytes = Buffer.from(embeddedAudio[name], "base64").length;
+  if (decodedBytes > EMBEDDED_BASE64_HARD_LIMIT) {
+    failures.push(`音频数据包 ${name} 解码后 ${(decodedBytes / 1024).toFixed(0)} KiB，超过单条 Base64 1 MiB 硬上限`);
+  }
 }
 
 const referencedAssets = [...js.matchAll(/["'`]assets\/([^"'`?]+)/g)].map((match) => `assets/${match[1]}`);
